@@ -2,9 +2,9 @@
 
 Following code reproduces the original design of the 3260 monitoring scheme based on the report of [Westra et al. (2014)](https://pureportal.inbo.be/portal/nl/publications/monitoring-natura-2000habitats(d55c5f7a-f349-4ebd-8579-33121faf6f21).html).
 
-## Sample frame
+## 3260 map
 
-We used version 1.4 of habitatstreams as the sample frame. This version is not yet avaialable on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the sample frame and also information on the different strata which are part of the design:
+We used version 1.4 of habitatstreams as the basis for the sample frame. This version is not yet avaialable on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the map and also information on the different strata which are part of the design:
 
 * postion relative to sac:
 ** intersects with sac or downstream of sac
