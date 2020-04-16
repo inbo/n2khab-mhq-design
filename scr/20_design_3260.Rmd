@@ -1,0 +1,291 @@
+# Design monitoring scheme 3260
+
+Following code reproduces the original design of the 3260 monitoring scheme based on the report of [Westra et al. (2014)](https://pureportal.inbo.be/portal/nl/publications/monitoring-natura-2000habitats(d55c5f7a-f349-4ebd-8579-33121faf6f21).html).
+
+## Sample frame
+
+We used version 1.4 of habitatstreams as the sample frame. This version is not yet avaialable on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the sample frame and also information on the different strata which are part of the design:
+
+* postion relative to sac:
+** intersects with sac or downstream of sac
+** outside of sac (and not downstream of sac)
+* size of catchment area
+** < 10 km²
+** > 10 km²
+
+To do: reproduce determination of the strata information
+
+```{r}
+
+map_3260 <- read_habitatstreams()
+
+map_3260_original <- read_sf("../data/streams_original", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
+
+```
+
+```{r}
+map_3260 <- map_3260 %>%
+  mutate(length = st_length(geometry))
+
+tot_map_3260 <- sum(map_3260$length)
+
+map_3260_original <- map_3260_original %>%
+  mutate(length_3260 = st_length(geometry))
+
+tot_map_3260_original <- sum(map_3260_original$length_3260)
+
+difference <- tot_map_3260 - tot_map_3260_original
+```
+
+Note: in the actual 3260 map (version 1.6) the length of 3260 habitat is `r difference` larger.
+
+```{r}
+sample_frame_3260 <- map_3260_original %>%
+  select(name = naam, wl_code = WLcode, catchment_area = SGO__km²_, sac = SBZ, province = provincie, length_3260) %>%
+  mutate(sac = ifelse(sac %in% c("intersect SBZ", "sa"), "intersecting or downstream",
+                      ifelse(sac == "buiten", "outside", NA)),
+         catchment_area = ifelse(catchment_area %in% c("10-50", ">50"), "> 10 km²",
+                                 ifelse(catchment_area == "<10", "< 10 km²", NA)))
+
+check <- map_3260_original %>%
+  st_drop_geometry() %>%
+  mutate(sac = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
+                      ifelse(SBZ == "buiten", "outside", NA))) %>%
+  group_by(SGO__km²_, sac) %>%
+  summarise(length_3260 = sum(length_3260)) %>%
+  ungroup()
+
+check2 <- map_3260_original %>%
+  st_drop_geometry() %>%
+  group_by(SBZ) %>%
+  summarise(length_3260 = sum(length_3260),
+            n = n()) %>%
+  ungroup()
+```
+
+
+## Sample size
+
+```{r}
+n_flanders <- 80
+n_sac <- 170
+```
+
+We choose a initial sample size of ´r n_flanders´ in Flanders and we oversample within sac and downstream of sac until a sample size of 170 is reached. The sample is distributed over catchment area classes '< 10 km²' and '> 10 km²' proportional to the length of 3260 in each class.
+
+
+```{r}
+calc_finite_samplesize <- function(N, n_infinite){
+  n_finite <- N * n_infinite/(n_infinite + (N - 1))
+  return(n_finite)
+}
+
+```
+
+Next, we calculate the sample size for a finite population using the finite population correction. The population size is the number of 100 meter segments with 3260 habitat.
+
+```{r}
+sac_3260 <- sample_frame_3260 %>%
+  st_drop_geometry() %>%
+  group_by(sac) %>%
+  summarise(length_3260 = drop_units(sum(length_3260))) %>%
+  mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
+  ungroup() %>%
+  mutate(N = length_3260/100)
+
+N_flanders <- round(sum(sac_3260$N), 0)
+
+N_sac <- (sac_3260 %>%
+  filter(sac == "intersecting or downstream"))$N %>%
+  round(0)
+
+n_finite_flanders <- calc_finite_samplesize(N = N_flanders, n_infinite = n_flanders) %>%
+  round(0)
+
+n_finite_sac <- calc_finite_samplesize(N = N_sac, n_infinite = n_sac) %>%
+  round(0)
+
+proportion_outside <- (sac_3260 %>%
+  filter(sac =="outside"))$proportion_3260
+
+n_finite_outside <- (n_finite_flanders * proportion_outside /100) %>%
+  round(0)
+
+sample_size <- data.frame(sac = c("intersecting or downstream", "outside"),
+                      n_finite = c(n_finite_sac, n_finite_outside)) %>%
+  as_tibble()
+
+sample_size_strata <- sample_frame_3260 %>%
+  st_drop_geometry() %>%
+  group_by(sac, catchment_area) %>%
+  summarise(length_3260 = drop_units(sum(length))) %>%
+  mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
+  ungroup() %>%
+  left_join(sample_size, by = "sac") %>%
+  mutate(n_finite_stratum = round(n_finite * proportion_3260/100, 0))
+  
+```
+
+The following table shows the resulting finite sample size in each stratum. 
+
+```{r}
+sample_size_strata %>%
+  mutate(length_3260 = round(length_3260, 0),
+         proportion_3260 = round(proportion_3260, 0)) %>%
+  kable() %>%
+  kable_styling()
+```
+
+Note: in the report Westra et al. (2014) an error was made when distributing the sample size over the different strata. So the sample size for each strata is different here, but correct.
+
+## Devide 3260 map into 100 m segments and assign GRTS-ranking each segment 
+
+The sample unit for 3260 is a 100 meter segment. Therefore we select points on the linesegments of the 3260 map every 100 meter using spsample. Each selected point corresponds with the beginning of a sample unit.
+
+```{r}
+tot_length_3260 <- sum(sac_3260$length_3260)
+
+segments_3260 <- spsample(as_Spatial(sample_frame_3260),
+                          n = ceiling(tot_length_3260/100),
+                          type="regular",
+                          cellsize=100,
+                          offset=0)
+
+sample_frame_3260_buffer <- st_buffer(sample_frame_3260,
+                              dist = 1)
+                              
+segments_3260$name <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$name
+segments_3260$wl_code <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$wl_code
+segments_3260$catchment_area <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$catchment_area
+segments_3260$sac <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$sac
+segments_3260$province <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$province
+segments_3260$segment_id <- 1:nrow(segments_3260@data)
+
+segments_3260_2 <- segments_3260 %>%
+  as("sf")
+
+```
+
+Next we assign a GRTS-ranking to each point by overlaying it with the [GRTS-master sample](https://zenodo.org/record/2682323#.XpgXMcgzaUk). However, some (parts of) streams are situated on the border with the Netherlands and as a consequence some linesegments that represent these streams are situated outside Flanders. This means there is no overlap with the GRTS-master. In this case, we assign the GRTS-ranking of the closest grid-cell to the point.
+
+Note: a better solution would be to extend the GRTS-master sample outside the borders of Flanders for approximately 100 meter. However we follow the aproach that was originally used. 
+
+In a next step, we deselect all points with a distance of more than 32 meters to the center of the nearest GRTS-master cell, except for point on the Meuse river. 
+
+
+```{r}
+grts_master <- read_GRTSmh()
+
+segments_3260 <- segments_3260_2 %>%
+  mutate(grts_ranking = grts_master[as(., "Spatial")])
+
+segments_3260_border <- segments_3260 %>%
+  filter(is.na(grts_ranking))
+
+segments_3260_border_buffer <- segments_3260_border %>%
+  st_buffer(dist = 100)
+
+grts_border <- grts_master %>%
+  mask(segments_3260_border_buffer) %>%
+  rasterToPoints(spatial = TRUE) %>%
+  st_as_sf()
+
+write_sf(grts_border, dsn = "../output/grts_border4", layer = "check_grts_border", driver = "ESRI Shapefile")
+
+segments_3260_border_grts <- segments_3260_border %>%
+ st_join(grts_border, join = st_nearest_feature) %>%
+  group_by(segment_id) %>%
+  mutate(dist = min(drop_units(st_distance(geometry, grts_border)))) %>%
+  ungroup() %>%
+  mutate(grts_ranking = GRTSmaster_habitats) %>%
+  filter(dist < 32 | name == "MAAS") %>%
+  dplyr::select(-GRTSmaster_habitats, -dist) 
+
+segments_3260_final <- segments_3260 %>%
+  filter(!is.na(grts_ranking)) %>%
+  rbind(segments_3260_border_grts) %>%
+  arrange(segment_id) %>%
+  mutate(sample_order = rank(grts_ranking)) 
+
+```
+
+We compare the result with the original file 'steekproefkader_3260_v2015-05-28' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)).
+
+```{r}
+
+segments_original <- read_sf("../data/streams_original", "steekproefkader_3260_v2015-05-28", crs = 31370) %>%
+  dplyr::select(Volgorde, RankingGRT, naam, ID)
+
+#write_sf(segments_3260_final, dsn = "../output/check", layer = "check2", driver = "ESRI Shapefile")
+
+check <- segments_3260_final %>%
+  st_join(segments_original)
+
+check2 <- segments_original %>%
+  st_join(segments_3260_final)
+
+# one point does not overlap spatially
+
+compare1 <- check %>%
+  filter(is.na(Volgorde)) %>%
+  st_coordinates()
+
+compare2 <- check2 %>%
+  filter(is.na(segment_id)) %>%
+  st_coordinates()
+
+check_points <- are_equal(compare1, compare2)
+
+# strange: both points have the same coordinates
+
+# besides this: grts-ranking and sample order matches with the original sample frame
+
+```
+
+The segment points for the 3260 type and the corresponding grts-ranking is exported as a table. 
+
+```{r}
+
+habitatmap_streams_segments <-  segments_3260_final %>%
+  st_drop_geometry() %>%
+  mutate(type = factor("3260", levels = levels(map_3260$type)),
+         x = (st_coordinates(segments_3260_final))[,1],
+         y = (st_coordinates(segments_3260_final))[,2]) %>%
+  dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
+  
+write_vc(habitatmap_streams_segments, file = "habitatmap_streams_segments", root = "../output", sorting = "segment_id")
+
+```
+
+## Sample selection
+
+Finally, we select in each stratum the number of samples required based on the grts-ranking.
+
+```{r}
+
+sample_3260 <- segments_3260_final %>%
+  st_drop_geometry() %>%
+  mutate(type = factor("3260", levels = levels(map_3260$type)),
+         x = (st_coordinates(segments_3260_final))[,1],
+         y = (st_coordinates(segments_3260_final))[,2]) %>%
+  left_join(dplyr::select(sample_size_strata, sac, catchment_area, n_finite_stratum), by = c("sac", "catchment_area")) %>%
+  group_by(sac, catchment_area) %>%
+  mutate(sample_order_stratum = rank(grts_ranking)) %>%
+  ungroup() %>%
+  mutate(sample = sample_order_stratum <= n_finite_stratum,
+         sac = factor(sac, levels = c("intersecting or downstream", "outside")),
+         catchment_area = factor(catchment_area, levels = c("< 10 km²", "> 10 km²")),
+         sample_id = str_c(grts_ranking, "_",type)) %>%
+  dplyr::select(sample_id, segment_id, type, river_name = name, sac, catchment_area,  grts_ranking, sample) %>%
+  arrange(sac, catchment_area, grts_ranking)
+  
+check_unique <- sample_3260 %>%
+  group_by(grts_ranking) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+write_vc(sample_3260, file = "sample_streams", root = "../output", sorting = c("sac", "catchment_area", "grts_ranking"))
+```
+
+Note: there are 2 segment points that are located in the same grts-master cell.
+
