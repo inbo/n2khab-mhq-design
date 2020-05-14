@@ -52,6 +52,7 @@ library(kableExtra)
 library(units)
 library(raster)
 library(assertthat)
+library(lwgeom)
 
 options(stringsAsFactors = FALSE)
 
