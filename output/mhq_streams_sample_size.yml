@@ -1,0 +1,21 @@
+..generic:
+  git2rdata: 0.2.0
+  optimize: yes
+  NA string: NA
+  sorting:
+  - sac
+  - catchment_area
+  hash: b19b651ad59beefd4e3eb575adafb7cb18e59714
+  data_hash: 6c80f443ecc9ef00a392da5435aa8e833332fa9a
+sac:
+  class: character
+catchment_area:
+  class: character
+length_3260:
+  class: numeric
+proportion_3260:
+  class: numeric
+n_finite:
+  class: numeric
+n_finite_stratum:
+  class: numeric
