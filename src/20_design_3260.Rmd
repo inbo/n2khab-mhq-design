@@ -4,7 +4,7 @@ Following code reproduces the original design of the 3260 monitoring scheme base
 
 ## 3260 map
 
-We used version 1.4 of habitatstreams as the basis for the sample frame. This version is not yet avaialable on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the map and also information on the different strata which are part of the design:
+We used version 1.4 of habitatstreams as the basis for the sample frame. This version is not yet available on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the map and also information on the different strata which are part of the design:
 
 * postion relative to sac:
 ** intersects with sac or downstream of sac
@@ -148,7 +148,7 @@ sample_size_strata %>%
 
 Note: in the report Westra et al. (2014) an error was made when distributing the sample size over the different strata. So the sample size for each strata is different here, but correct.
 
-## Devide 3260 map into 100 m segments and assign GRTS-ranking each segment 
+## Divide 3260 map into 100 m segments and assign GRTS-ranking each segment 
 
 The sample unit for 3260 is a 100 meter segment. Therefore we select points on the linesegments of the 3260 map every 100 meter using spsample. Each selected point corresponds with the beginning of a sample unit.
 
@@ -216,6 +216,8 @@ segments_3260_final <- segments_3260 %>%
   rbind(segments_3260_border_grts) %>%
   arrange(segment_id) %>%
   mutate(sample_order = rank(grts_ranking)) 
+
+st_crs(segments_3260_final) <- 31370
 
 ```
 
