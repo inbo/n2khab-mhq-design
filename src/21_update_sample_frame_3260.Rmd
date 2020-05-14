@@ -1,0 +1,308 @@
+## Updating 3260 sampling frame
+
+We will update the old sampling frame for 3260 (that was based on 3260 map version 1.4). 
+The old sampling frame consists of points that represent the sampling units (100 meter river segments). 
+Each point is located in the most downstream part of the sampling unit. 
+We will start with selecting points each 100 meter for all rivers in Flanders so that when the 3260 map changes in the future, we do not need to select new points again.
+Of course we want to keep the the points in the old sample frame as quite a number of them have already been sampled and measured in the field. 
+So we will exclude the newly selected points that overlap with the old 3260 map and replace this with the points in the old sample frame.
+Finally we will select the points that overlay with the new version of the 3260 map resulting in the updated sampling frame.
+The stepwise procedure is explained below. 
+
+### Data import
+
+- Read new 3260 map and sample frame based on old 3260 map
+
+```{r}
+
+map_3260_new <- read_sf("../data/habitatmap3260", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+
+map_3260_old <- read_sf("../data/streams_original", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
+
+segments_3260_old <- read_vc(file = "habitatmap_streams_segments", "../output")
+
+segments_3260_old_sf <- segments_3260_old %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) 
+```
+
+```{r}
+# on_line_all = st_cast(nrst, "POINT")
+# buf_all <- st_combine(st_buffer(on_line_all,0.1))
+# parts_all = st_collection_extract(lwgeom::st_split(river$geometry, buf_all),"LINESTRING")
+# 
+# parts_all = st_as_sf(
+#   data.frame(
+#     id = 1:length(parts_all),
+#     geometry = parts_all
+#   )
+# )
+# 
+# mapview(parts_all, burst = "id")
+
+
+# segments <- st_cast(segments_3260_old_sf, "POINT") %>%
+#   st_combine()
+# segments_buffer <- st_combine(st_buffer(segments, 0.01))
+# segments_lines <- st_collection_extract(lwgeom::st_split(map_3260_old, segments_buffer), "LINESTRING")
+# 
+# test <- segments_lines %>%
+#   mutate(id = 1:nrow(.)) %>%
+#   group_by(id) %>%
+#   mutate(length_segment = st_length(geometry)) %>%
+#   ungroup() %>%
+#   filter(length_segment > 0.5)
+
+#st_write(test, "../output/test_segment", "test_segment", driver = "ESRI Shapefile")
+
+```
+
+
+
+- Read Flemish Hydrological Atlas (VHA) with all river segments in Flanders
+
+```{r}
+vha <- read_sf("../data/vha", "Wlas", crs = 31370)
+```
+
+- Read DTM (25m) for Flanders
+
+```{r}
+dtm <- raster("../data/DHMVIIDTMRAS25m/GeoTIFF/DHMVIIDTMRAS25m.tif")
+```
+
+- Read sac
+
+```{r}
+sac <- read_admin_areas(dsn = "sac") %>%
+  dplyr::select(sac_code)
+```
+
+- Read grts
+
+```{r}
+grts_master <- read_GRTSmh()
+```
+
+
+### Select points that represent 100m sampling units on all rivers in Flanders
+
+- select points on line segments in vha every 100 meters
+
+```{r}
+vha_length <- sum(vha$LENGTE)
+
+segments_vha <- spsample(as_Spatial(vha),
+                          n = ceiling(vha_length/100),
+                          type="regular",
+                          cellsize=100,
+                          offset=0)
+
+vha_buffer <- st_buffer(vha, dist = 1)
+                              
+segments_vha$name <- over(segments_vha, as_Spatial(vha_buffer))$NAAM
+segments_vha$wl_code <- over(segments_vha, as_Spatial(vha_buffer))$WTRLICHC
+segments_vha$vhas <- over(segments_vha, as_Spatial(vha_buffer))$VHAS
+segments_vha$oidn <- over(segments_vha, as_Spatial(vha_buffer))$OIDN
+
+segments_vha_2 <- segments_vha %>%
+  as("sf")
+
+st_crs(segments_vha_2) <- st_crs(vha)
+
+st_write(segments_vha_2, "../output/segments_vha", "segments_vha", driver = "ESRI Shapefile")
+```
+
+```{r}
+
+# vha_seg <- vha %>%
+#   st_union() %>%
+#   st_segmentize(dfMaxLength = 100) 
+# 
+# 
+# test_seg <- vha %>%
+#   filter(WTRLICHC == "VL11_117") %>%
+#   # group_by(WTRLICHC) %>%
+#   # summarise(tot_length = sum(st_length(geometry))) %>%
+#   # ungroup() %>%
+#   st_union() %>%
+#   st_segmentize(dfMaxLength = 100) %>%
+#   st_cast(to = "LINESTRING") %>%
+#   mutate(id = 1:nrow(.)) %>%
+#   group_by(id) %>%
+#   mutate(length_segm = st_length(geometry)) %>%
+#   ungroup()
+# 
+# 
+# st_write(test_seg, "../output/test_segmentatie", "test_segmentatie5", driver = "ESRI Shapefile", append = TRUE)
+# plot(test_seg)
+```
+
+
+
+- Next we select the points that are not within the old map of 3260 (version 1.4), because for this old map we have already selected points every 100 meter and we want to keep the previously selected points.
+
+- We also want to avoid that the newly selected point on the vha linestrings are closer than 100 meter to the previously selected points when both are in the same waterbody. 
+We perform a quick and dirty approach, by taking a (linear) buffer of 50 meter along the previously selected points. So to avoid to much complexity, we do not calculate distances along the river linestrings. 
+We leave out the newly selected points that are within a buffer of a previuosly selected point that is located within the same waterbody (defined bij wl_code).
+
+- Note that the wl_code assigned to the previously selected points are outdated and have to be updated based on an overlay with vha.
+
+```{r}
+
+vha_buffer <- st_buffer(vha, dist = 1) %>%
+  dplyr::select(wl_code = WTRLICHC)
+
+segments_3260_old_sf <- segments_3260_old %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  rename(wl_code_old = wl_code) %>%
+  st_join(vha_buffer, join = st_nearest_feature)
+    
+segments_3260_old_buffer <- segments_3260_old_sf %>%
+  st_buffer(dist = 50) %>%
+  dplyr::select(segment_id, wl_code_buffer = wl_code)
+
+map_3260_old_buffer <- map_3260_old %>%
+  st_buffer(dist = 1) %>%
+  dplyr::select(wl_code_old_3260 = WLcode)
+
+vha_overlay <- segments_vha_2 %>%
+  mutate(id = str_c("new_", 1:nrow(.))) %>%
+  st_join(map_3260_old_buffer) %>%
+  mutate(in_map_3260_old = !is.na(wl_code_old_3260),
+         height = dtm[as(., "Spatial")],
+         x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2],
+         grts_ranking = grts_master[as(., "Spatial")]) %>%
+  st_join(sac) %>%
+  st_join(segments_3260_old_buffer)
+  
+vha_overlay_df <- vha_overlay %>%
+  st_drop_geometry()
+
+vha_difference <- vha_overlay_df %>%
+  filter(!in_map_3260_old) %>%
+  mutate(check = wl_code != wl_code_buffer)
+
+vha_difference_buffer <- vha_difference %>%
+  group_by(id, name, wl_code, height, sac_code, grts_ranking, x, y) %>%
+  summarise(within_100mbuffer_3260_old = sum(wl_code == wl_code_buffer, na.rm = TRUE) > 0) %>%
+  ungroup() %>%
+  filter(!within_100mbuffer_3260_old) 
+
+```
+
+
+- Next we combine the newly selected vha points with the previously selected point on the old 3260 map. We also add the strata information (position relative to sac) that is part of the old 3260 map.
+
+```{r}
+map_3260_old_strata <- map_3260_old %>%
+  mutate(sac_old = ifelse(SBZ == "sa", "downstream",
+                          ifelse(SBZ == "intersect SBZ", "intersect",
+                                 ifelse(SBZ == "buiten", "outside", NA)))) %>%
+  dplyr::select(sac_old, naam) %>%
+  st_buffer(dist = 1) 
+  # st_join(sac, largest = TRUE) %>%
+  # rename(sac_code_segment = sac_code)
+
+
+vha_segments_combined <- segments_3260_old_sf %>%
+  st_join(sac) %>%
+  st_join(map_3260_old_strata, largest = TRUE) %>%
+  mutate(height = dtm[as(., "Spatial")],
+         id = str_c("old_", segment_id),
+         x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  dplyr::select(id, name = river_name, wl_code, wl_code_old, height, sac_code, sac_old, grts_ranking, x, y) %>%
+  bind_rows(vha_difference_buffer)
+  
+```
+
+
+
+
+```{r}
+library(lwgeom)
+
+map_3260_new_buffer <- map_3260_new %>%
+  st_buffer(10) %>%
+  st_combine() %>%
+  st_geometry()
+
+
+# st_write(map_3260_new_startpoint, "../output/map_3260_startpoint", "map_3260_startpoint", driver = "ESRI Shapefile")
+
+map_3260_new_sac <- map_3260_new %>%
+  st_buffer(10) %>%
+  dplyr::select(SBZ)
+
+segments_3260_new_intersect <- vha_segments_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  filter(st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
+  st_join(map_3260_new_sac, largest = TRUE)
+
+map_3260_new_startpoint_buffer <- st_startpoint(map_3260_new) %>%
+  st_as_sf() %>%
+  mutate(id_temp = 1:nrow(.)) %>%
+  st_join(map_3260_new, largest = TRUE) %>%
+  st_buffer(dist = 100) %>%
+  dplyr::select(wl_code, SBZ)
+
+
+segments_3260_new_extra <- vha_segments_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  filter(st_intersects(geometry, map_3260_new_startpoint_buffer, sparse = FALSE)) %>%
+  filter(!id %in% segments_3260_new_intersect$id) %>%
+  st_join(map_3260_new_sac, largest = TRUE)
+
+segments_3260_new <- segments_3260_new_extra %>%
+  rbind(segments_3260_new_intersect) %>%
+  mutate(sac = ifelse(SBZ %in% c("sa", "intersect SBZ"), "intersecting or downstream",
+                      ifelse(SBZ %in% c("buiten"), "outside", NA)),
+         catchment_area = ifelse(str_sub(wl_code, 1, 2) %in% c("VL", "L1"), "> 10 km²",
+                                  ifelse(str_sub(wl_code, 1, 2) == "L2",  "< 10 km²", NA))) %>%
+  dplyr::select(segment_code = id, wl_code, grts_ranking, sac, catchment_area)
+
+#st_write(segments_3260_new, "../output/segments_3260_v1_8", "segments_3260_new_v1_8", driver = "ESRI Shapefile", append  = TRUE)
+
+sample_frame_3260 <- segments_3260_new %>%
+  mutate(x = st_coordinates(geometry)[,1],
+         y = st_coordinates(geometry)[, 2]) %>%
+  st_drop_geometry()
+
+write_vc(sample_frame_3260,root =  "../data", file = "sample_frame_3260_v18", sorting = c("segment_code", "grts_ranking"))
+```
+
+
+
+
+### Assign strata
+
+```{r}
+# wl_sac_height <- vha_segments_combined %>%
+#   filter(!is.na(sac_code)) %>%
+#   group_by(wl_code, sac_code) %>%
+#   summarise(max_height_sac = max(height)) %>%
+#   ungroup() %>%
+#   group_by(wl_code) %>%
+#   summarise(max_height = max(max_height_sac),
+#             sac_code_wl = str_c(sac_code, collapse = " + ")) %>%
+#   ungroup() 
+# 
+# vha_segments_combined_strata <- vha_segments_combined %>%
+#   left_join(wl_sac_height, by = c("wl_code")) %>%
+#   mutate(sac_strata = ifelse(!is.na(sac_code), "intersect inside",
+#                              ifelse(!is.na(sac_code_segment) & (height < max_height), "intersect outside",
+#                                     ifelse(!is.na(max_height) & (height < max_height), "downstream", "outside"))),
+#          sac = ifelse(sac_strata %in% c("intersect", "downstream"), "intersecting or downstream", sac_strata),
+#          sac_old = ifelse(sac_old%in% c("intersect", "downstream"), "intersecting or downstream", sac_old)
+#          )
+# 
+#  compare <- vha_segments_combined_strata %>%
+#    filter(!is.na(sac_old)) %>%
+#    mutate(verschil = sac != sac_old) 
+
+## hmmmm: geen succes
+```
+
+
