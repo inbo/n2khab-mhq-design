@@ -1,0 +1,90 @@
+# Progress evaluation
+
+## Import data
+
+### Admin data
+
+```{r}
+admin_orig <- read.csv2("../data/admin/Monitoring3260_SVZ2019.csv", stringsAsFactors = FALSE)
+```
+
+### Sample frame 3260
+
+```{r}
+sample_frame_3260 <- read_vc(root =  "../output", file = "sample_frame_3260_v18")
+```
+
+### Sample size
+
+```{r}
+sample_size_3260 <- read_vc(root =  "../output", file = "mhq_streams_sample_size")
+```
+
+
+## Explore admin data
+
+```{r}
+admin <- admin_orig %>%
+  mutate(sampling_unit_code = str_c("1_4_", IDToonW),
+         assessment_year = jaar.monitoring,
+         assessment_date = as.Date(datum.veldbezoek, format = "%d/%m/%Y"),
+         sac = ifelse(SBZ == 1, "intersecting or downstream",
+                      ifelse(SBZ == 0, "outside", NA)),
+         catchment_area = ifelse(SGO__km²_ == "<10", "< 10 km²", "> 10 km²")) %>%
+  dplyr::select(field_code = Veldcode, sampling_unit_code, catchment_area, sac,  assessment_year, assessment_date, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y)
+```
+
+```{r}
+admin %>%
+  group_by(klasse) %>%
+  summarise(n_obs = n()) %>%
+  ungroup() %>%
+  kable() %>%
+  kable_styling()
+```
+
+## Assessments
+
+```{r}
+assessments_3260 <- admin %>%
+  filter(klasse != "") %>%
+  filter(!(klasse %in% c("niet meetellen (is vervangen)", "niet meetellen (2x bezocht)"))) %>%
+  mutate(inaccessability = ifelse(klasse %in% c("uitval (ongeschikt)", "uitval (ontoegankelijk)"), "long term",
+                                  ifelse(klasse == "uitval (tijdelijk ongeschikt)", "short term", NA)),
+           is_type_target = ifelse(klasse == "mon3260", TRUE,
+                                   ifelse(klasse == "uitval (gh)", FALSE, NA)),
+         position_change = is.na(sampling_unit_code))
+
+assessments_3260_replaced <- admin %>%
+  filter(str_detect(field_code, "_o") | field_code == "SchNe_04o") %>%
+  mutate(field_code = str_replace(field_code, "_o", ""),
+         field_code = ifelse(field_code == "SchNe_04o", "SchNe_04", field_code)) %>%
+  dplyr::select(field_code, sac, sampling_unit_code, catchment_area)
+
+assessments_3260_position_change <- assessments_3260 %>%
+  filter(position_change) %>%
+  dplyr::select(-sac, -catchment_area, -sampling_unit_code) %>%
+  left_join(assessments_3260_replaced, by = "field_code")
+
+assessments_3260 <- assessments_3260 %>%
+  filter(!position_change) %>%
+  bind_rows(assessments_3260_position_change)
+```
+
+## Progress
+
+```{r}
+progress_3260 <- assessments_3260 %>%
+  group_by(catchment_area, sac) %>%
+  summarise(n_assessed = sum(!is.na(is_type_target)),
+            n_inaccessable = sum(!is.na(inaccessability)),
+            n_target_type = sum(is_type_target, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(dplyr::select(sample_size_3260, catchment_area, sac, n_finite_stratum), by =c("catchment_area", "sac")) %>%
+  mutate(detection_rate_pct = round(n_target_type/ n_assessed * 100, 1),
+           progress_pct = round(n_target_type/n_finite_stratum * 100, 1))
+              
+              
+```
+
+
