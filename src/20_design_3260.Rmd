@@ -21,6 +21,7 @@ map_3260 <- read_habitatstreams()
 
 map_3260_original <- read_sf("../data/streams_original", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
 
+st_write(map_3260_original,dsn =  "../data/habitatmap3260_v14.gpkg", layer =  "habitatmap3260_v14", driver = "GPKG")
 ```
 
 ```{r}
