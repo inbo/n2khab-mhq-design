@@ -275,9 +275,24 @@ st_write(segments_3260_new_addgrts, "../output/segments_3260_v18_2.gpkg", "segme
 sample_frame_3260 <- segments_3260_new_addgrts %>%
   mutate(x = st_coordinates(geometry)[,1],
          y = st_coordinates(geometry)[, 2]) %>%
-  st_drop_geometry()
+  st_drop_geometry() %>%
+  unique() %>%
+  rename(sampling_unit_code = segment_code) %>%
+  mutate(sampling_unit_code = str_replace(sampling_unit_code, "old", "1_4"),
+         sampling_unit_code = str_replace(sampling_unit_code, "new", "1_8"))
 
-write_vc(sample_frame_3260, root =  "../data", file = "sample_frame_3260_v18", sorting = c("segment_code", "grts_ranking"), strict = FALSE)
+
+check <- sample_frame_3260 %>%
+  group_by(sampling_unit_code) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+sample_frame_3260 <- sample_frame_3260 %>%
+  filter(!(sampling_unit_code == "1_4_1873" & sac == "outside")) %>%
+  filter(!(sampling_unit_code == "1_8_17866" & sac == "outside"))
+  
+
+write_vc(sample_frame_3260, root =  "../output", file = "sample_frame_3260_v18", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
 ```
 
 ## Alternative
