@@ -17,28 +17,12 @@ To do: reproduce determination of the strata information
 
 ```{r}
 
-map_3260 <- read_habitatstreams()
+map_3260_original <- read_sf("../data/habitatstreams/v1_4", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
 
-map_3260_original <- read_sf("../data/streams_original", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
+map_3260_v1_6 <- read_habitatstreams()
 
-st_write(map_3260_original,dsn =  "../data/habitatmap3260_v14.gpkg", layer =  "habitatmap3260_v14", driver = "GPKG")
+#st_write(map_3260_original,dsn =  "../data/habitatmap3260_v14.gpkg", layer =  "habitatmap3260_v14", driver = "GPKG")
 ```
-
-```{r}
-map_3260 <- map_3260 %>%
-  mutate(length = st_length(geometry))
-
-tot_map_3260 <- sum(map_3260$length)
-
-map_3260_original <- map_3260_original %>%
-  mutate(length_3260 = st_length(geometry))
-
-tot_map_3260_original <- sum(map_3260_original$length_3260)
-
-difference <- tot_map_3260 - tot_map_3260_original
-```
-
-Note: in the actual 3260 map (version 1.6) the length of 3260 habitat is `r difference` larger.
 
 
 ```{r}
@@ -48,29 +32,16 @@ map_3260_original_strata <- map_3260_original %>%
 ```
 
 
-
-```{r}
+```{r, warning=FALSE}
 sample_frame_3260 <- map_3260_original %>%
+  group_by(OBJECTID) %>%
+  mutate(length_3260 = st_length(geometry)) %>%
+  ungroup() %>%
   dplyr::select(name = naam, wl_code = WLcode, catchment_area = SGO__km²_, sac = SBZ, province = provincie, length_3260) %>%
   mutate(sac = ifelse(sac %in% c("intersect SBZ", "sa"), "intersecting or downstream",
                       ifelse(sac == "buiten", "outside", NA)),
          catchment_area = ifelse(catchment_area %in% c("10-50", ">50"), "> 10 km²",
                                  ifelse(catchment_area == "<10", "< 10 km²", NA)))
-
-check <- map_3260_original %>%
-  st_drop_geometry() %>%
-  mutate(sac = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
-                      ifelse(SBZ == "buiten", "outside", NA))) %>%
-  group_by(SGO__km²_, sac) %>%
-  summarise(length_3260 = sum(length_3260)) %>%
-  ungroup()
-
-check2 <- map_3260_original %>%
-  st_drop_geometry() %>%
-  group_by(SBZ) %>%
-  summarise(length_3260 = sum(length_3260),
-            n = n()) %>%
-  ungroup()
 ```
 
 
@@ -98,7 +69,7 @@ Next, we calculate the sample size for a finite population using the finite popu
 sac_3260 <- sample_frame_3260 %>%
   st_drop_geometry() %>%
   group_by(sac) %>%
-  summarise(length_3260 = drop_units(sum(length_3260))) %>%
+  summarise(length_3260 = sum(length_3260)) %>%
   mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
   ungroup() %>%
   mutate(N = length_3260/100)
@@ -128,7 +99,7 @@ sample_size <- data.frame(sac = c("intersecting or downstream", "outside"),
 sample_size_strata <- sample_frame_3260 %>%
   st_drop_geometry() %>%
   group_by(sac, catchment_area) %>%
-  summarise(length_3260 = drop_units(sum(length_3260))) %>%
+  summarise(length_3260 = sum(length_3260)) %>%
   mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
   ungroup() %>%
   left_join(sample_size, by = "sac") %>%
@@ -261,12 +232,12 @@ The segment points for the 3260 type and the corresponding grts-ranking is expor
 
 habitatmap_streams_segments <-  segments_3260_final %>%
   st_drop_geometry() %>%
-  mutate(type = factor("3260", levels = levels(map_3260$type)),
+  mutate(type = factor("3260", levels = levels(map_3260_v1_6$type)),
          x = (st_coordinates(segments_3260_final))[,1],
          y = (st_coordinates(segments_3260_final))[,2]) %>%
   dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
   
-write_vc(habitatmap_streams_segments, file = "habitatmap_streams_segments", root = "../output", sorting = "segment_id")
+write_vc(habitatmap_streams_segments, file = "sample_frame_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
 
 ```
 
@@ -278,7 +249,7 @@ Finally, we select in each stratum the number of samples required based on the g
 
 sample_3260 <- segments_3260_final %>%
   st_drop_geometry() %>%
-  mutate(type = factor("3260", levels = levels(map_3260$type)),
+  mutate(type = factor("3260", levels = levels(map_3260_v1_6$type)),
          x = (st_coordinates(segments_3260_final))[,1],
          y = (st_coordinates(segments_3260_final))[,2]) %>%
   left_join(dplyr::select(sample_size_strata, sac, catchment_area, n_finite_stratum), by = c("sac", "catchment_area")) %>%
@@ -289,7 +260,7 @@ sample_3260 <- segments_3260_final %>%
          sac = factor(sac, levels = c("intersecting or downstream", "outside")),
          catchment_area = factor(catchment_area, levels = c("< 10 km²", "> 10 km²")),
          sample_id = str_c(grts_ranking, "_",type)) %>%
-  dplyr::select(sample_id, segment_id, type, river_name = name, sac, catchment_area,  grts_ranking, sample) %>%
+  dplyr::select(sample_id, segment_id, type, river_name = name, sac, catchment_area, wl_code, grts_ranking, sample, x, y) %>%
   arrange(sac, catchment_area, grts_ranking)
   
 check_unique <- sample_3260 %>%
@@ -297,7 +268,7 @@ check_unique <- sample_3260 %>%
   mutate(n = n()) %>%
   ungroup()
 
-write_vc(sample_3260, file = "sample_streams", root = "../output", sorting = c("sac", "catchment_area", "grts_ranking"))
+write_vc(sample_3260, file = "sample_habitatstreams_v1_4", root = "../output", sorting = c("sac", "catchment_area", "grts_ranking"), strict = FALSE)
 ```
 
 Note: there are 2 segment points that are located in the same grts-master cell.
