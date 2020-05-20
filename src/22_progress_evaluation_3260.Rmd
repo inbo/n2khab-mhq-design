@@ -2,26 +2,26 @@
 
 ## Inleiding
 
-In dit document evalueren we de voortgang van het meetnet habitatkwaliteit voor habitattype 3260 en selecteren we prioritair af te werken meetpunten. We maken hiervoor gebruik van de meest recente habitatkaart voor 3260 (versie 1.8).
+In dit document evalueren we de voortgang van het meetnet habitatkwaliteit voor habitattype 3260 en selecteren we prioritair af te werken meetpunten. We maken hiervoor gebruik van de meest recente habitatkaart voor 3260 (versie 1.7).
 
 ## Gebruikte data
 
-- meetpuntadministratie ('Monitoring3260_SVZ2019_VrToonWestra.xlsx')
+- meetpuntadministratie (origineel bestand = 'Monitoring3260_SVZ2019_VrToonWestra.xlsx'). See this [Google Drive folder](https://drive.google.com/drive/folders/14N1ObhUjKfvmjJcZSQ2vKtpuWA8PSiK7).
 
 ```{r}
-admin_orig <- read.csv2("../data/admin/Monitoring3260_SVZ2019.csv", stringsAsFactors = FALSE)
+admin_orig <- read.csv2("../data/adminstreams/Monitoring3260_SVZ2019.csv", stringsAsFactors = FALSE)
 ```
 
-- steekproefkader afgeleid uit habitatkaart versie 1.8
+- steekproefkader afgeleid uit habitatkaart versie 1.7
 
 ```{r}
-sample_frame_3260 <- read_vc(root =  "../output", file = "sample_frame_3260_v18")
+sample_frame_3260 <- read_vc(root =  "../output", file = "sample_frame_habitatstreams_v1_7")
 ```
 
-- habitatkaart versie 1.8
+- habitatkaart versie 1.7
 
 ```{r}
-map_3260_new <- read_sf("../data/habitatmap3260", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
 ```
 
 
@@ -29,9 +29,9 @@ map_3260_new <- read_sf("../data/habitatmap3260", "BasisbestandSteekproefvernieu
 sample_size_3260 <- read_vc(root =  "../output", file = "mhq_streams_sample_size")
 ```
 
-## Bijgewerkte steekproefgrootteberekening gebaseerd op habitatkaart v1.8
+## Bijgewerkte steekproefgrootteberekening gebaseerd op habitatkaart v1.7
 
-- De initiële steekproefgrootte blijft ongewijzigd, maar de finite population correction wordt uitgevoerd op basis van het aantal populatieeenheden (100m segmenten) in de habitatkaart 1.8
+- De initiële steekproefgrootte blijft ongewijzigd, maar de finite population correction wordt uitgevoerd op basis van het aantal populatieeenheden (100m segmenten) in de habitatkaart 1.7
 
 - We maken geen gebruik meer van stratum stroomgebiedgrootte. Dit was initieel wel zo omdat we er vanuit gingen dat in het stroomgebied > 10 km², we deels van VMM-meetpunten konden gebruik maken. Nu INBO de gegevensinzameling volledig zelf uitvoert, is het niet meer nodig om dit stratum te gebruiken. 
 
@@ -303,7 +303,7 @@ sample_units_priority %>%
   st_drop_geometry() %>%
   arrange(sac, volgorde) %>%
   dplyr::select(-distance_to_map3260, -in_map3260) %>%
-  write.csv2("../output/meetpuntent3260_prioritair.csv", row.names = FALSE)
+  write.csv2("../output/meetpuntent3260_prioritair_versie2020-05-20.csv", row.names = FALSE)
 ```
 
 
