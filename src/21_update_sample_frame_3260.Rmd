@@ -11,54 +11,22 @@ The stepwise procedure is explained below.
 
 ## Data import
 
-- Read new 3260 map and sample frame based on old 3260 map
+- Read new 3260 map (v1.7) and sample frame based on old 3260 map. See this [Google Drive folder](https://drive.google.com/drive/folders/1mZJH1vaED6s2BA-zQivn8Nrag9NZ4C9D).
 
 ```{r}
 
-map_3260_new <- read_sf("../data/habitatmap3260", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
 
-map_3260_old <- read_sf("../data/streams_original", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
+map_3260_old <- read_sf("../data/habitatstreams/v1_4", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
 
-segments_3260_old <- read_vc(file = "habitatmap_streams_segments", "../output")
+segments_3260_old <- read_vc(file = "sample_habitatstreams_v1_4", "../output")
 
 segments_3260_old_sf <- segments_3260_old %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) 
 ```
 
-```{r}
-# on_line_all = st_cast(nrst, "POINT")
-# buf_all <- st_combine(st_buffer(on_line_all,0.1))
-# parts_all = st_collection_extract(lwgeom::st_split(river$geometry, buf_all),"LINESTRING")
-# 
-# parts_all = st_as_sf(
-#   data.frame(
-#     id = 1:length(parts_all),
-#     geometry = parts_all
-#   )
-# )
-# 
-# mapview(parts_all, burst = "id")
 
-
-# segments <- st_cast(segments_3260_old_sf, "POINT") %>%
-#   st_combine()
-# segments_buffer <- st_combine(st_buffer(segments, 0.01))
-# segments_lines <- st_collection_extract(lwgeom::st_split(map_3260_old, segments_buffer), "LINESTRING")
-# 
-# test <- segments_lines %>%
-#   mutate(id = 1:nrow(.)) %>%
-#   group_by(id) %>%
-#   mutate(length_segment = st_length(geometry)) %>%
-#   ungroup() %>%
-#   filter(length_segment > 0.5)
-
-#st_write(test, "../output/test_segment", "test_segment", driver = "ESRI Shapefile")
-
-```
-
-
-
-- Read Flemish Hydrological Atlas (VHA) with all river segments in Flanders
+- Read Flemish Hydrological Atlas (VHA) with all river segments in Flanders. We use the version of VHA that was used to create habitatstreams v1.7: 201806. See this [Google Drive folder](https://drive.google.com/drive/folders/1ikEkf5N4ckWcyCMSgM1O_OgcZCFjX9B4).  
 
 ```{r}
 vha <- read_sf("../data/VHA_201806", "Wlas", crs = 31370)
@@ -194,11 +162,18 @@ vha_segments_combined <- segments_3260_old_sf %>%
   dplyr::select(id, name = river_name, wl_code, wl_code_old, sac_code, sac_old, grts_ranking, x, y) %>%
   bind_rows(vha_difference_buffer)
   
-
 ```
 
 
+## Create updated sample frame for 3260
 
+We create an updated sample frame for 3260 by selecting the points that intersect with a buffer of 5 meter around the new 3260 habitatmap (v1.7). 
+
+We also want to include points that do not intersect but for which the 100 m segment will contain 3260 habitat according to the habitatmap. 
+Remember that the points represent the most downstream location of each 100 m segment. 
+So we only want to select (not intersecting points) that are located (less than 100 meter) downstream of 3260 habitat. 
+We do this by creating a buffer of 75 meter around the starting points of each linestring in the habitatmap (these starting points are normally the most downstream location of the linesegment) and than selecting all points that intersect with the buffer and have the same wl_code (to avoid selectin points in other streams). 
+This approach is not perfect, so we add an extra restrictions: we exclude points that are located in the old habitatmap (v1.4) as it is quite unlikely that these points are suited.
 
 ```{r}
 
@@ -288,7 +263,7 @@ sample_frame_3260 <- segments_3260_new_addgrts %>%
   unique() %>%
   rename(sampling_unit_code = segment_code) %>%
   mutate(sampling_unit_code = str_replace(sampling_unit_code, "old", "1_4"),
-         sampling_unit_code = str_replace(sampling_unit_code, "new", "1_8"))
+         sampling_unit_code = str_replace(sampling_unit_code, "new", "1_7"))
 
 
 check <- sample_frame_3260 %>%
@@ -299,25 +274,33 @@ check <- sample_frame_3260 %>%
 
 sample_frame_3260 <- sample_frame_3260 %>%
   filter(!(sampling_unit_code == "1_4_1873" & sac == "outside")) %>%
-  filter(!(sampling_unit_code == "1_8_17866" & sac == "outside"))
+  filter(!(sampling_unit_code == "1_7_17866" & sac == "outside"))
   
 
-write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "sample_frame_3260_v18", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
+write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "sample_frame_habitatstreams_v1_7", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
 
-st_write(sample_frame_3260, "../output/sample_frame_3260.gpkg", "sample_frame_3260_v18_versie2020-05-19", driver = "GPKG", append = TRUE)
-# st_write(segments_3260_new_extra, "../output/segments_3260_v18", "segments_3260_new_extra_v18", driver = "ESRI Shapefile", append  = TRUE)
+st_write(sample_frame_3260, "../output/sample_frame_streams.gpkg", "sample_frame_habitatstreams_v1_7", driver = "GPKG", append = TRUE)
+
+streams_segments_all <- vha_segments_combined %>%
+  mutate(sampling_unit_code = str_replace(id, "old", "1_4"),
+        sampling_unit_code = str_replace(id, "new", "1_7") ) %>%
+  dplyr::select(sampling_unit_code, wl_code, x, y, grts_ranking, river_name =name) 
+
+streams_segments_all %>%
+  write_vc(root =  "../output", file = "streams_segments_all", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
+
 ```
 
-## Alternative
+
 
 ```{r}
-vha_3260 <- vha %>%
-  filter(st_intersects(geometry,map_3260_new_buffer, sparse = FALSE))
-
-vha_3260_segments <- vha_3260 %>%
-  st_split(st_combine(st_buffer(segments_3260_new, 0.01)))
-  
-  
+# vha_3260 <- vha %>%
+#   filter(st_intersects(geometry,map_3260_new_buffer, sparse = FALSE))
+# 
+# vha_3260_segments <- vha_3260 %>%
+#   st_split(st_combine(st_buffer(segments_3260_new, 0.01)))
+#   
+#   
 ```
 
 
