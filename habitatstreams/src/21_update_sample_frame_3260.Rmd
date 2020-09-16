@@ -162,6 +162,9 @@ vha_segments_combined <- segments_3260_old_sf %>%
   dplyr::select(id, name = river_name, wl_code, wl_code_old, sac_code, sac_old, grts_ranking, x, y) %>%
   bind_rows(vha_difference_buffer)
   
+#vha_segments_combined %>%
+  # st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  # st_write(dsn = "../output/check2.gpkg", "vha_segments_combined", driver ="GPKG")
 ```
 
 
@@ -173,7 +176,6 @@ We also want to include points that do not intersect but for which the 100 m seg
 Remember that the points represent the most downstream location of each 100 m segment. 
 So we only want to select (not intersecting points) that are located (less than 100 meter) downstream of 3260 habitat. 
 We do this by creating a buffer of 75 meter around the starting points of each linestring in the habitatmap (these starting points are normally the most downstream location of the linesegment) and than selecting all points that intersect with the buffer and have the same wl_code (to avoid selectin points in other streams). 
-This approach is not perfect, so we add an extra restrictions: we exclude points that are located in the old habitatmap (v1.4) as it is quite unlikely that these points are suited.
 
 ```{r}
 
@@ -182,14 +184,20 @@ map_3260_new_buffer <- map_3260_new %>%
   st_combine() %>%
   st_geometry()
 
+#st_write(map_3260_new_buffer, "../output/check.gpkg", "map_3260_new_buffer", driver = "GPKG")
+
 map_3260_new_sac <- map_3260_new %>%
   st_buffer(10) %>%
   dplyr::select(SBZ)
 
 segments_3260_new_intersect <- vha_segments_combined %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) %>%
-  filter(st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
-  st_join(map_3260_new_sac, largest = TRUE)
+  #mutate(check = st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
+  # st_join(map_3260_new_buffer, largest = TRUE)
+  # st_drop_geometry()
+  # filter(st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
+  st_join(map_3260_new_sac, largest = TRUE) %>%
+  filter(!is.na(SBZ))
 
 map_3260_new_startpoint_buffer <- st_startpoint(map_3260_new) %>%
   st_as_sf() %>%
@@ -207,8 +215,7 @@ segments_3260_new_extra <- vha_segments_combined %>%
   st_join(map_3260_new_startpoint_buffer, largest = TRUE) %>%
   filter(!is.na(SBZ)) %>%
   filter(wl_code == wl_code_extra) %>%
-  filter(wl_code != "G") %>%
-  filter(str_sub(id, 1,3) != "old") 
+  filter(!(id %in% segments_3260_new_intersect$id))
 
 check <- segments_3260_new_extra %>%
   st_drop_geometry() %>%
@@ -279,7 +286,7 @@ sample_frame_3260 <- sample_frame_3260 %>%
 
 write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "sample_frame_habitatstreams_v1_7", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
 
-st_write(sample_frame_3260, "../output/sample_frame_streams.gpkg", "sample_frame_habitatstreams_v1_7", driver = "GPKG", append = TRUE)
+st_write(sample_frame_3260, "../output/sample_frame_streams.gpkg", "sample_frame_habitatstreams_v1_7", driver = "GPKG", append = TRUE, delete_layer = TRUE)
 
 streams_segments_all <- vha_segments_combined %>%
   mutate(sampling_unit_code = str_replace(id, "old", "1_4"),
