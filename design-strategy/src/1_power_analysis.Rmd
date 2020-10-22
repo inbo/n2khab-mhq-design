@@ -1,0 +1,508 @@
+# Steekproefgrootteberekening
+
+De (regionale) kwaliteit van een habitattype is ongunstig wanneer meer dan 25 van het habitatoppervlak een slechte lokale kwaliteit (gebaseerd op de LSVI) heeft. Via het meetnet habitatkwalitiet willen we regionale kwaliteit bepalen voor de habitattypes in Vlaanderen [@westra2014]. Een steekproefgrootteberekening  geeft het verband tussen de steekproefgrootte een het minimale effect (verschil) dat we kunnen detecteren, gegeven het significantieniveau $\alpha$ en het onderscheiden vermogen $\beta$. 
+
+## Minimaal detecteerbaar verschil t.o.v. grenswaarde 25%
+
+Voor een snelle steekproefgrooteberekening voor het minimaal detecteerbaar verschil t.o.v. grenswaarde kunnen we gebruik maken van een *proportion test* [@cohen1988] via de functie `pwr.p.test` van het pwr package [@campely2020].   
+
+
+```{r hulpfunctie}
+
+Es.h_inv <- function(h, p2) {
+  (sin((h + 2*asin(sqrt(p2))) / 2))^2
+}
+
+p1 <- 0.3
+p2 <- 0.25
+
+check <- p1  -  Es.h_inv(ES.h(p1, p2), p2) < 0.001
+```
+
+
+```{r powerverschil}
+
+sim_data <- expand.grid(
+  n_sim = seq(20, 1000, 1),
+  alpha = c(0.05, 0.10),
+  power = c(0.80, 0.50),
+  p2 = 0.25
+)
+sim_data$p1_low <- NULL
+sim_data$p1_high <- NULL
+
+for (i in 1:nrow(sim_data)) {
+  
+  h = (pwr.p.test(sig.level = sim_data$alpha[i],
+                        power = sim_data$power[i],
+                        alternative = "two.sided",
+                        n = sim_data$n_sim[i]))$h
+  
+  sim_data$p1_low[i] <- round(Es.h_inv(-h, sim_data$p2[i]), 3)
+  sim_data$p1_high[i] <- round(Es.h_inv(h,sim_data$p2[i]), 3)
+}
+
+```
+
+```{r}
+
+status_bos <- read.csv2("../data/statushabitat_bos_toestand.csv")
+status_grasland_moeras <- read.csv2("../data/statushabitat_graslandMoeras.csv")
+statushabitat_6510 <- read.csv2("../data/statushabitat_6510.csv")
+statushabitat_heide <- read.csv2("../data/statushabitat_heide.csv")
+statushabitat_pink <- read.csv2("../data/statushabitat_pink.csv")
+
+status_types <- bind_rows(
+  status_bos,
+  status_grasland_moeras,
+  statushabitat_6510,
+  statushabitat_heide,
+  statushabitat_pink
+) %>%
+  filter(TypeResultaat == "Habitattype",
+         Schaal == "Vlaanderen",
+         Versie == "Versie 3",
+         nObs > 5) %>%
+  dplyr::select(type = Habitattype, n = nObs, prop_goed = AandeelGunstig, prop_goed_lci = AandeelGunstig_LLCI, prop_goed_uci = AandeelGunstig_ULCI) %>%
+  mutate(type = ifelse(type == "91", "91E0", as.character(type))) %>%
+  arrange(type) %>%
+  mutate(prop_slecht = (100 - prop_goed)/100,
+         verschil_greswaarde = round(prop_slecht - 0.25, 3),
+     uitspraak  = ifelse(prop_goed_lci > 75, "gunstig",
+                             ifelse(prop_goed_uci < 75, "ongunstig", "onbekend")))
+
+
+
+
+```
+
+Figuur \@ref(fig:figpowerverschil) en Tabel \@ref(tab:tab-powerverschil) tonen de resultaten van de steekproefgrootteberekening. Deze komen redelijk goed overeen met de resultaten van de steekproefgrootteberekening door [@Onkelinx2007]. Wanneer in werkelijkheid minder dan 16,3 % van het habitat een slechte kwaliteit heeft zullen we met een steekproefgrootte van 170 kunnen besluiten dat het aandeel habitat met slechte kwaliteit significant lager is dan de drempelwaarde van 25 % (bij een onderscheidend vermogen van 80 % en een significantieniveau van 5 %). Het minimaal detecteerbaar verschil bedraagt dus 8,7 %. Omgekeerd, als in werkelijkheid meer dan 34,8 % een slechte kwaliteit heeft, kunnen we besluiten dat het aandeel habitat met slechte kwaliteit significant hoger is dan de drempelwaarde van 25 %. Als het habitataandeel met slechte kwaliteit tussen 16,3 % en 34,8 % ligt, biedt een steekproefgrootte van een 170 onvoldoende zekerheid dat we een significant verschil t.o.v. de grenswaarde kunnen vaststellen (het onderscheidend vermogen wordt dus lager).       
+
+```{r figpowerverschil, fig.cap = "Minimaal detecteerbaar effect in functie van de steekproefgrootte bij een onderscheidend vermogen van 80 %"}
+
+ggplot() +
+  geom_line(data = sim_data, aes(x = n_sim, y = p1_low, linetype = factor(alpha), colour = factor(power))) +
+  geom_line(data = sim_data, aes(x = n_sim, y = p1_high, linetype = factor(alpha), colour = factor(power))) +
+  geom_hline(yintercept = 0.25, linetype = 1, size = 1, alpha = 0.5) +
+  labs(x = "Steekproefgrootte", y = "Aandeel habitat met slechte kwaliteit", linetype = expression(alpha), colour = expression(beta)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_linetype_manual(values = c(2,3))
+
+
+```
+
+```{r tab-powerverschil}
+sim_data_tabel <- sim_data %>%
+  filter(n_sim %in% c(40, 80, 170, 400, 1000)) %>%
+  mutate(gunstig = str_c("< ", p1_low * 100, " %"),
+         ongunstig = str_c("> ", p1_high * 100, " %"),
+         lager = (p1_low - p2) * 100,
+         hoger = (p1_high - p2) * 100) %>%
+  dplyr::select("$\\alpha$" = alpha, "$\\beta$" = power, steekproefgrootte = n_sim, gunstig, ongunstig, lager, hoger)
+
+sim_data_tabel %>%
+  kable(align = "c", caption = "Minimaal detecteerbaar effect in functie van de steekproefgrootte, het significantieniveau ($\\alpha$) en het onderscheidend vermogen ($\\beta$)") %>%
+  kable_styling() %>%
+  collapse_rows(c(1, 2), target = 1) %>%
+  add_header_above(c(" " = 5, "minimaal detecteerbaar effect" = 2))
+```
+
+
+
+```{r figrapportage, fig.cap = "Minimaal detecteerbaar effect in functie van de steekproefgrootte bij een onderscheidend vermogen van 80 %"}
+
+sim_data0.8 <- sim_data %>%
+  filter(power == 0.8) %>%
+  filter(n_sim <= 300)
+
+ggplot() +
+  geom_line(data = sim_data0.8, aes(x = n_sim, y = p1_low, linetype = factor(alpha))) +
+  geom_line(data = sim_data0.8, aes(x = n_sim, y = p1_high, linetype = factor(alpha))) +
+  geom_hline(yintercept = 0.25, linetype = 1, size = 1, alpha = 0.5) +
+  #geom_point(data = status_types, aes(x = n, y = prop_slecht), alpha = 1, size = 1) +
+  geom_text(data = status_types, aes(x = n, y = prop_slecht, label = type, colour = uitspraak), alpha = 1, size = 5, check_overlap = TRUE) +
+  labs(x = "Steekproefgrootte", y = "Aandeel habitat met slechte kwaliteit", linetype = expression(alpha)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_linetype_manual(values = c(2,3)) +
+  scale_colour_manual(values = c("gunstig" = inbo.groen, "ongunstig" = inbo.rood, "onbekend" = inbo.grijs)) 
+
+```
+
+## Verschil tussen proporties
+
+We zijn ook geïnteresseerd hoe het oppervlakteaandeel met slechte kwaliteit verandert in de tijd en we willen dus weten welke verschillen in proporties we kunnen detecteren tussen twee tijdstippen. Om hierin inzicht te krijgen, maken we gebruik van de McNemar test [@Shao2003] via de functie `McNemar.Test` in het package TrialSize [@Zhang2020]. 
+
+Het meetnet habitatkwaliteit maakt gebruik van permanente meetpunten en we hebben dus gepaarde metingen. Als de meetpunten op twee tijdstippen worden opgemeten en de kwaliteit per meetpunt wordt vastgesteld kunnen we de resultaten als volgt samenvatten.
+
+```{r}
+data.frame(
+  t1 = c("slecht", "goed"),
+  slecht = c("geen verandering", "goed -> slecht"),
+  goed = c("slecht -> goed", "geen verandering")
+) %>%
+  kable() %>%
+  kable_styling() %>%
+  column_spec(1, bold = TRUE) %>%
+  add_header_above(c(" " = 1, "t2" = 2))
+
+
+```
+Het verschil in het oppervlakteaandeel met slechte kwaliteit tussen t1 en t2 is komt dan overeen met het verschil tussen de proportie meetpunten goed->slecht en de proportie meetpunten slecht->goed. In Figuur \@ref(fig:figpowertrend) geven we de minimaal detecteerbare afname/toename in oppervlakteaandeel met slechte kwaliteit in functie van de steekproefgrootte en de dynamiek van het habitattype. Daarbij is de dynamiek gelijk aan:
+
+$$\frac{opp_{slecht->goed} + opp_{goed->slecht}}{| opp_{slecht->goed} - opp_{goed->slecht}|)} $$
+
+Stel dat het oppervlakteaandeel met slechte kwaliteit met 10 % daalt, dan hebben we bijvoorbeeld een dynamiek van 2 als 15 % van het oppervlakte van slecht naar goed gaat en 5 % van het oppervlakte van goed naar slecht gaat. Hoe groter de dynamiek, hoe kleiner het verschil dat we minimaal kunnen detecteren. 
+
+
+
+
+```{r, eval = FALSE}
+#absolute afname of toename
+alpha <- 0.05
+power <- 0.8
+
+odds <- seq(10, 1, by=-0.1)
+afname <- c(0.50,0.25,0.10,0.05,0.01)
+
+data_sim <- expand.grid(afname = afname,
+                    odds = odds) %>%
+  mutate(goed_slecht = afname/(odds - 1),
+         slecht_goed = odds * goed_slecht,
+         disc_pairs = slecht_goed + goed_slecht,
+         alpha = 0.05,
+         power = 0.8,
+         f = disc_pairs/afname,
+         n = McNemar.Test(alpha = alpha,
+                          beta = 1 - power,
+                          psai = odds,
+                          paid = disc_pairs)) %>%
+  filter(n < 600, disc_pairs < 0.8)
+
+ggplot(data_sim, aes(x = disc_pairs, y = n, group = factor(afname))) +
+  geom_line(aes(colour = factor(afname))) +
+  xlab("slecht_goed + goed_slecht") + labs(colour = "absolute afname of absolute toename") +
+  scale_y_log10(breaks = c(40, 80 , 170, 500)) 
+ 
+```
+
+
+```{r figpowertrend, fig.cap = "Minimaal detecteerbaar effect in functie van de steekproefgrootte, de dynamiek en $\\alpha$ bij onderscheidend vermogen van 80 %"}
+
+afname_netto <- seq(0.40, 0.01, by = -0.001)
+
+prop_afname_bruto <- seq(1.01, 3, by = 0.001)
+
+data_sim <- expand.grid(afname = afname_netto,
+                        prop_afname_bruto = prop_afname_bruto,
+                        alpha = c(0.05, 0.10)) %>%
+  mutate(afname_bruto = afname * prop_afname_bruto,
+         toename_bruto = afname_bruto - afname,
+         disc_pairs = afname_bruto + toename_bruto,
+         f = (afname_bruto + toename_bruto)/ afname,
+         odds = afname_bruto/toename_bruto,
+         alpha = alpha,
+         power = 0.8,
+         f = disc_pairs/afname,
+         n = McNemar.Test(alpha = alpha,
+                          beta = 1 - power,
+                          psai =  odds,
+                          paid = disc_pairs)) 
+
+# ggplot(data_sim, aes(x = f, y = n, group = factor(afname))) +
+#   geom_line(aes(colour = factor(afname))) +
+#   xlab("dynamiek") + labs(colour = "absolute afname of absolute toename") +
+#   scale_y_log10(breaks = c(40, 80 , 170, 500)) 
+# 
+# ggplot(data_sim, aes(x = disc_pairs, y = n, group = factor(afname))) +
+#   geom_line(aes(colour = factor(afname))) +
+#   xlab("dynamiek") + labs(colour = "absolute afname of absolute toename") +
+#   scale_y_log10(breaks = c(40, 80 , 170, 500)) 
+
+data_sim %>%
+  mutate(f = round(f, 2)) %>%
+  filter(f %in% c(1.02, 1.5, 2)) %>%
+  ggplot(aes(x = n, y = afname, colour = factor(f), linetype = factor(alpha))) +
+  geom_line() +
+  scale_x_log10(breaks = c(20, 40, 80 , 170, 400, 1000)) + 
+  labs(colour = "Dynamiek",
+       linetype = expression(alpha),
+       y = "Absolute afname of toename", 
+       x = "Steekproefgrootte") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_linetype_manual(values = c(2,3))
+
+
+```
+
+In Tabel \@ref(tab:tab-powertrend) geven we een overzicht van de resultaten voor verschillende *dynamieken*. In geval van een steekproefgrootte van 170 kunnen we dus een verandering in oppervlakteaandeel met slechte kwaliteit van ongeveer 5 % detecteren bij een lage dynamiek (en met $\alpha$ = 0.05 en $\beta$ = 0.8) en verandering van 9 % bij een hoge dynamiek.    
+
+
+```{r}
+data_sim_tabel_40 <- data_sim %>%
+  mutate(f = round(f, 2)) %>%
+  filter(f %in% c(1.02, 1.5, 2)) %>%
+  group_by(f, alpha) %>%
+  slice_min(order_by = abs(n - 40), n = 1) %>%
+  ungroup() %>%
+  mutate(n_approx = 40)
+
+data_sim_tabel_80 <- data_sim %>%
+  mutate(f = round(f, 2)) %>%
+  filter(f %in% c(1.02, 1.5, 2)) %>%
+  group_by(f, alpha) %>%
+  slice_min(order_by = abs(n - 80), n = 1) %>%
+  ungroup()%>%
+  mutate(n_approx = 80)
+
+data_sim_tabel_170 <- data_sim %>%
+  mutate(f = round(f, 2)) %>%
+  filter(f %in% c(1.02, 1.5, 2)) %>%
+  group_by(f, alpha) %>%
+  slice_min(order_by = abs(n - 170), n = 1) %>%
+  ungroup()%>%
+  mutate(n_approx = 170)
+
+data_sim_tabel_400 <- data_sim %>%
+  mutate(f = round(f, 2)) %>%
+  filter(f %in% c(1.02, 1.5, 2)) %>%
+  group_by(f, alpha) %>%
+  slice_min(order_by = abs(n - 400), n = 1) %>%
+  ungroup()%>%
+  mutate(n_approx = 400)
+
+data_sim_tabel <- bind_rows(data_sim_tabel_40,
+                            data_sim_tabel_80,
+                            data_sim_tabel_170,
+                            data_sim_tabel_400) %>%
+  mutate(dynamiek = ifelse(f == 1.02, "lage dynamiek",
+                           ifelse(f == 1.5, "middelhoge dynamiek",
+                                  ifelse(f==2, "hoge dynamiek", NA))),
+         dynamiek = factor(dynamiek, levels = c("lage dynamiek", "middelhoge dynamiek", "hoge dynamiek")),
+         afname = afname * 100,
+         steekproefgrootte = n_approx) %>%
+    dplyr::select(alpha, afname, dynamiek, steekproefgrootte) %>%
+  spread(key = "dynamiek", value = "afname")
+  
+
+```
+
+
+```{r tab-powertrend2}
+data_sim_tabel %>%
+  kable(caption = "Minimaal detecteerbaar verschil in functie van steekproefgrootte en drie waarden voor de dynamiek (lage dynamiek = 1.02, middelhoge dynamiek =  1.5 en hoge dynamiek = 2) bij onderscheidend vermogen van 80 %") %>%
+  kable_styling() %>%
+  add_header_above(c(" " = 2, "absolute afname of toename (%)" = 3)) %>%
+  collapse_rows(1)
+  
+```
+
+## Verschil continue variabelen
+
+```{r}
+sim_data <- expand.grid(n = 20:400,
+                        sd_difference = c(5, 10, 15),
+                        alpha = c(0.050, 0.1)) %>%
+  group_by(n, sd_difference, alpha) %>%
+  mutate(d = (pwr.t.test(n = n,
+                        power = 0.80,
+                        sig.level = alpha,
+                        type = "paired",
+                        alternative = "two.sided"
+                        ))$d) %>%
+  ungroup() %>%
+  mutate(mean_difference = d * sd_difference)
+```
+
+### Algemeen
+
+Het detecteerbaar effect (d) is gelijk aan het gemiddelde van het verschil gedeeld door de standaard deviatie van het verschil. Figuur \@ref(fig:fig-verschil-cont) toont het detecteerbaar effect in functie van de steekproefgrootte.
+
+
+```{r fig-verschil-cont, fig.cap = "Detecteerbaar effect (d) in functie van de steekproefgrootte bij onderscheidend vermogen van 80 %"}
+sim_data %>%
+  ggplot(aes(x = n, y = d,  linetype = factor(alpha))) +
+  geom_line() +
+  labs(linetype = expression(alpha),
+       x = "Steekproefgrootte",
+       d = "Detecteerbaar effetc (d)") 
+```
+
+```{r tab-powerd}
+sim_data %>%
+  filter(n %in% c(40, 80, 170, 400)) %>%
+  mutate(d = round(d, 2)) %>%
+  arrange(alpha, n) %>%
+  dplyr::select("$\\alpha$" = alpha, "Steekproefgrootte" = n, "Detecteerbaar effect (d)" = d) %>%
+  unique() %>%
+  kable( ) %>%
+  kable_styling() %>%
+  collapse_rows(1)
+  
+```
+
+### Voorbeeld: verschil in bedekkingen (0 - 100 %)
+
+```{r}
+sim_data %>%
+  ggplot(aes(x = n, y = mean_difference, colour = factor(sd_difference), linetype = factor(alpha))) +
+  geom_line() +
+  labs(linetype = expression(alpha),
+       colour = "Standaard deviatie verschil",
+       y = "Gemiddelde van verschil",
+       x = "Steekproefgrootte") 
+```
+
+```{r tab-powertrend}
+sim_data %>%
+  filter(n %in% c(40, 80, 170, 400)) %>%
+  mutate(mean_difference = round(mean_difference, 1)) %>%
+  dplyr::select(n, alpha, sd_difference, mean_difference) %>%
+  spread(key = "sd_difference", value = "mean_difference") %>%
+  arrange(alpha, n) %>%
+  dplyr::select("$\\alpha$" = alpha, "Steekproefgrootte" = n, everything()) %>%
+  kable( ) %>%
+  kable_styling() %>%
+  add_header_above(c(" " = 2, "Standaard deviatie van verschil" = 3)) %>%
+  collapse_rows(1)
+  
+```
+
+
+### Voorbeelden boshabitats
+
+
+```{r}
+
+data_bos <- read.csv2("../data/StatusHabitatvlek_bos_trend.csv") %>%
+  filter(Versie == "Versie 3") %>%
+  dplyr::select(id = ID, plot_id = IDPlots, periode = Periode, type = Habitattype, sac = SBZH, stratum_weigh = StratumWeight, status = Status_habitatvlek, aandeel_gunstig = AandeelGunstig) %>%
+  mutate(plot_id = str_sub(id, end = -3)) %>%
+  mutate(periode = str_c("periode", periode)) %>%
+  filter(type != 9110) %>%
+  mutate(type = as.character(type),
+         type = ifelse(type == "91", "91E0", as.character(type)))
+
+```
+
+```{r figbos, fig.cap= "Aandeel gunstige indicatoren per meetpunt voor beide  periodes"}
+data_bos %>%
+  dplyr::select(plot_id, periode, type, aandeel_gunstig) %>%
+  spread(key = "periode", value = "aandeel_gunstig") %>%
+  ggplot(aes(x= periode1, y = periode2)) +
+  geom_point(alpha = 0.1) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  xlim(0, 100) +
+  ylim(0, 100) +
+  facet_wrap(~type)
+```
+
+
+```{r}
+verschil_aandeel_gunstig <- data_bos %>%
+  dplyr::select(plot_id, periode, type, aandeel_gunstig) %>%
+  spread(key = periode, value = aandeel_gunstig) %>%
+  mutate(verschil_aandeel_gunstig = periode2 - periode1) %>%
+  group_by(type) %>%
+  summarise(n = n(),
+            mean_diff = round(mean(verschil_aandeel_gunstig), 2),
+            sd_diff = round(sd(verschil_aandeel_gunstig), 2),
+            d = round(mean_diff/sd_diff, 3),
+            t.test_p_value = round((t.test(Pair(periode1, periode2) ~ 1))$p.value, 5),
+            uitspraak = ifelse(t.test_p_value > 0.05, "onbekend",
+                               ifelse(mean_diff < 0, "afname", "toename"))
+           ) %>%
+  ungroup() 
+```
+
+Onderstaande tabel geeft voor de boshabitats het gemiddelde verschil weer van het aandeel (%) gunstige indicatoren (per meetpunt), de standaard deviatie van het verschil en de effectgrootte (d).    
+
+
+```{r}
+verschil_aandeel_gunstig %>%
+  dplyr::select(Habitattype = type, "Steekproefgrootte" = n, "Gemiddelde verschil" = mean_diff, "Standaard deviatie verschil" = sd_diff, d, "p-waarde (t-test)" = t.test_p_value, uitspraak) %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+
+```{r fig-verschil-cont2, fig.cap = "Detecteerbaar effect (d) in functie van de steekproefgrootte bij onderscheidend vermogen van 80 %"}
+
+ggplot() +
+  geom_line(data = sim_data, aes(x = n, y = d,  linetype = factor(alpha))) +
+  geom_text(data = verschil_aandeel_gunstig, aes(x = n, y = abs(d), label = type, colour = uitspraak), size = 5) +
+  labs(linetype = expression(alpha),
+       x = "Steekproefgrootte",
+       y = "Detecteerbaar effetc (d)") +
+  scale_colour_manual(values = c("toename" = inbo.groen, "onbekend" = inbo.grijs, "afname" = inbo.rood))
+
+  
+```
+
+
+
+```{r}
+voorwaarden_bos <- read.csv2("../data/voorwaarden_bos.csv", stringsAsFactors = FALSE) 
+
+voorwaarden_bos_select <- voorwaarden_bos %>%
+  mutate(plot_id = str_c(Meetnet, IDPlots),
+         periode = str_c("periode", Periode),
+         type = ifelse(Habitattype == 91, "91E0", as.character(Habitattype))) %>%
+  filter(Meetnet == "VBI") %>%
+  filter(Voorwaarde %in% c("aandeel dood hout", "grondvlak sleutelsoorten boom- en struiklaag", "aandeel sleutelsoorten kruidlaag", "aantal sleutelsoorten kruidlaag", "bedekking verruiging totaal", "bedekking invasieve exoten boom- en struiklaag")) %>%
+  filter(Versie == "Versie 3") %>%
+  filter(plot_id %in% data_bos$plot_id) %>%
+  dplyr::select(plot_id, periode, type, voorwaarde = Voorwaarde, waarde = Waarde) %>%
+  mutate(waarde = str_replace(waarde, ",", "."),
+         waarde = as.numeric(waarde),
+         waarde = ifelse(voorwaarde == "aandeel sleutelsoorten kruidlaag", pmin(100, waarde), waarde)) %>%
+  spread(key = "periode", value = "waarde") %>%
+  mutate(verschil_voorwaarde = periode2 - periode1)
+
+```
+```{r, fig.height= 12}
+voorwaarden_bos_select %>%
+  filter(type %in% c("9120", "91E0")) %>%
+  ggplot(aes(periode1, periode2)) +
+  geom_point(alpha = 0.1) +
+  facet_wrap( ~ type + voorwaarde, scales = "free", ncol = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2)
+```
+
+```{r}
+verschil_voorwaarden <- voorwaarden_bos_select %>%
+  group_by(type, voorwaarde) %>%
+  summarise(n = n(),
+            mean_diff = round(mean(verschil_voorwaarde), 2),
+            sd_diff = round(sd(verschil_voorwaarde), 2),
+            d = round(mean_diff/sd_diff, 3),
+            t.test_p_value = round((t.test(Pair(periode1, periode2) ~ 1))$p.value, 5),
+             uitspraak = ifelse(t.test_p_value > 0.05, "onbekend",
+                               ifelse(mean_diff < 0, "afname", "toename"))
+           ) %>%
+  ungroup() 
+
+verschil_voorwaarden %>%
+  filter(type %in% c("9120", "91E0")) %>%
+  dplyr::select(Habitattype = type, "Steekproefgrootte" = n, Voorwaarde = voorwaarde, "Gemiddelde verschil" = mean_diff, "Standaard deviatie verschil" = sd_diff, d, "p-waarde (t-test)" = t.test_p_value, uitspraak) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(c(1,2))
+  
+```
+
+
+```{r fig-verschil-cont3, fig.cap = "Detecteerbaar effect (d) in functie van de steekproefgrootte bij onderscheidend vermogen van 80 %", fig.height= 9}
+
+ggplot() +
+  geom_line(data = sim_data, aes(x = n, y = d,  linetype = factor(alpha))) +
+  geom_line(data = sim_data, aes(x = n, y = -d,  linetype = factor(alpha))) +
+  geom_text(data = verschil_voorwaarden, aes(x = n, y = d, label = voorwaarde, colour = uitspraak), size = 3, check_overlap = TRUE) +
+  labs(linetype = expression(alpha),
+       x = "Steekproefgrootte",
+       y = "Detecteerbaar effetc (d)") +
+  scale_colour_manual(values = c("toename" = inbo.groen, "onbekend" = inbo.grijs, "afname" = inbo.rood)) +
+  xlim(-80, 200) +facet_wrap(~type, ncol = 2)
+
+  
+```

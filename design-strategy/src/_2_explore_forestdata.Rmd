@@ -1,0 +1,112 @@
+# Verkenning gegevens bosinventarisatie
+
+
+```{r}
+data_bos <- read.csv2("../data/StatusHabitatvlek_bos_trend.csv") %>%
+  filter(Versie == "Versie 3") %>%
+  dplyr::select(id = ID, periode = Periode, type = Habitattype, sac = SBZH, stratum_weigh = StratumWeight, status = Status_habitatvlek) %>%
+  mutate(plot_id = str_sub(id, end = -3)) %>%
+  mutate(periode = str_c("periode", periode)) 
+```
+
+
+```{r}
+prop_period <- data_bos %>%
+  group_by(type, periode) %>%
+  summarise(proportie_gunstig = round(sum(status)/n(), 3),
+            nObs = n()) %>%
+  ungroup()
+
+
+changes_type <- data_bos %>%
+  dplyr::select(type, plot_id, status, periode) %>%
+  spread(key = periode, value = status) %>%
+  group_by(type) %>%
+  summarise(n_gepaard = n_distinct(plot_id),
+            prop_00 = sum(periode1 == 0 & periode2 == 0)/n_gepaard,
+         prop_11 = sum(periode1 == 1 & periode2 == 1)/n_gepaard,
+         prop_01 = sum(periode1 == 0 & periode2 == 1)/n_gepaard,
+         prop_10 = sum(periode1 == 1 & periode2 == 0)/n_gepaard,
+         ) %>%
+  ungroup() %>%
+  mutate(check = prop_00 + prop_01 + prop_10 + prop_11,
+         dynamiek = (prop_01 + prop_10)/abs(prop_01 - prop_10),
+         verschil_slecht = prop_10 - prop_01) %>%
+  filter(type %in% c(9120, 9130))
+
+```
+
+
+
+
+```{r}
+
+ changes_type <- changes_type %>%
+  dplyr::select(type, starts_with("prop"), dynamiek, verschil_slecht, n_orig = n_gepaard)
+
+sim_forest <- changes_type %>%
+  expand(nesting(type, prop_00, prop_11, prop_01, prop_10, dynamiek, verschil_slecht, n_orig), n_sim = c(40, 80, 170, 400)) %>%
+  group_by(type, n_sim) %>%
+  mutate(mcNemar_pvalue = (mcnemar.test(matrix(round(c(prop_00 * n_sim, prop_10 * n_sim, prop_01 * n_sim, prop_11 * n_sim), 0),
+                                              nrow = 2)))$p.value) %>%
+  ungroup()
+
+
+```
+
+?mcnemar.test
+
+
+```{r}
+mcnemar.test(as.matrix(contig_table_9120))
+```
+
+
+```{r}
+library(INLA)
+library(lme4)
+
+data_9120 <- data_bos %>%
+  filter(type == 9120) %>%
+  mutate(fperiode = factor(periode))
+
+model_change <- inla(formula = status ~ fperiode + f(plot_id, model = "iid") ,
+                     data = data_9120,
+                     family = "gaussian"
+                     )
+summary(model_change)
+model_change_binomial <- inla(formula = status ~ fperiode + f(plot_id, model = "iid") ,
+                     data = data_9120,
+                     family = "binomial"
+                     )
+summary(model_change_binomial)
+
+model_change2 <- inla(formula = status ~ fperiode ,
+                     data = data_9120,
+                     family = "gaussian"
+                     )
+
+summary_inla_iid <- summary(model_change)
+
+summary_inla_iid 
+
+```
+
+```{r}
+model_change_glmer <- glmer(formula = status ~ fperiode + (1|plot_id),
+                     data = data_9120,
+                     family = binomial
+                     )
+
+summary(model_change_glmer)
+
+model_change_lme <- glm(formula = status ~ fperiode ,
+                     data = data_9120,
+                     family = binomial
+                     )
+
+
+summary_lme <- summary(model_change_lme)
+summary_lme 
+```
+
