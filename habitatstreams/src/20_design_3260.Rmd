@@ -35,7 +35,7 @@ map_3260_original_strata <- map_3260_original %>%
 ```{r, warning=FALSE}
 sample_frame_3260 <- map_3260_original %>%
   group_by(OBJECTID) %>%
-  mutate(length_3260 = st_length(geometry)) %>%
+  mutate(length_3260 = drop_units(st_length(geometry))) %>%
   ungroup() %>%
   dplyr::select(name = naam, wl_code = WLcode, catchment_area = SGO__km²_, sac = SBZ, province = provincie, length_3260) %>%
   mutate(sac = ifelse(sac %in% c("intersect SBZ", "sa"), "intersecting or downstream",
@@ -237,7 +237,7 @@ habitatmap_streams_segments <-  segments_3260_final %>%
          y = (st_coordinates(segments_3260_final))[,2]) %>%
   dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
   
-write_vc(habitatmap_streams_segments, file = "sample_frame_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
+write_vc(habitatmap_streams_segments, file = "samplingframe_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
 
 ```
 

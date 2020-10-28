@@ -279,35 +279,36 @@ check <- sample_frame_3260 %>%
   mutate(n = n()) %>%
   ungroup()
 
+# correction based on visual inspection
 sample_frame_3260 <- sample_frame_3260 %>%
   filter(!(sampling_unit_code == "1_4_1873" & sac == "outside")) %>%
   filter(!(sampling_unit_code == "1_7_17866" & sac == "outside"))
   
-
 write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "sample_frame_habitatstreams_v1_7", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
 
 st_write(sample_frame_3260, "../output/sample_frame_streams.gpkg", "sample_frame_habitatstreams_v1_7", driver = "GPKG", append = TRUE, delete_layer = TRUE)
 
 streams_segments_all <- vha_segments_combined %>%
   mutate(sampling_unit_code = str_replace(id, "old", "1_4"),
-        sampling_unit_code = str_replace(id, "new", "1_7") ) %>%
-  dplyr::select(sampling_unit_code, wl_code, x, y, grts_ranking, river_name =name) 
+        sampling_unit_code = str_replace(sampling_unit_code, "new", "1_7") ,
+        name = str_to_lower(name)) %>%
+  dplyr::select(segment_id = sampling_unit_code, river_name = name, wl_code, x, y, grts_ranking) 
+
+check_unique_id <- streams_segments_all %>%
+  group_by(segment_id) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
 
 streams_segments_all %>%
-  write_vc(root =  "../output", file = "streams_segments_all", sorting = c("sampling_unit_code", "grts_ranking", "river_name"), strict = FALSE)
+  write_vc(root =  "../output", file = "streams_segments", sorting = c("segment_id", "grts_ranking", "river_name"), strict = FALSE)
 
 ```
 
 
 
 ```{r}
-# vha_3260 <- vha %>%
-#   filter(st_intersects(geometry,map_3260_new_buffer, sparse = FALSE))
-# 
-# vha_3260_segments <- vha_3260 %>%
-#   st_split(st_combine(st_buffer(segments_3260_new, 0.01)))
-#   
-#   
+
 ```
 
 
