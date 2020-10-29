@@ -46,15 +46,17 @@ options(stringsAsFactors = FALSE,
         digits = 15)
 library(sf)
 library(git2rdata)
+library(raster)
 library(tidyverse)
 library(knitr)
 library(n2khab)
 library(kableExtra)
 library(units)
-library(raster)
 library(assertthat)
 library(lwgeom)
 library(leaflet)
+library(units)
+library(renv)
 
 
 options(stringsAsFactors = FALSE)

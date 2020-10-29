@@ -1,0 +1,15 @@
+..generic:
+  git2rdata: 0.2.1
+  optimize: yes
+  NA string: NA
+  sorting: sac_streams
+  hash: dcb54b0e04bf8aeea2afcd5f5b0816e992de27fd
+  data_hash: 6472a518ef58e7dadd7390959cf5fa00aeb62a0f
+length_3260:
+  class: numeric
+proportion_3260:
+  class: numeric
+n_finite:
+  class: numeric
+sac_streams:
+  class: character

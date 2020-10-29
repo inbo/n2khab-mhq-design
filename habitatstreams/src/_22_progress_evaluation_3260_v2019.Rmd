@@ -9,7 +9,7 @@ In dit document evalueren we de voortgang van het meetnet habitatkwaliteit voor 
 - meetpuntadministratie (origineel bestand = 'Monitoring3260_SVZ2019_VrToonWestra.xlsx'). See this [Google Drive folder](https://drive.google.com/drive/folders/14N1ObhUjKfvmjJcZSQ2vKtpuWA8PSiK7).
 
 ```{r}
-admin_orig <- read.csv2("../data/adminstreams/Monitoring3260_SVZ2020_TW.csv", stringsAsFactors = FALSE)
+admin_orig <- read.csv2("../data/adminstreams/Monitoring3260_SVZ2019.csv", stringsAsFactors = FALSE)
 ```
 
 - steekproefkader afgeleid uit habitatkaart versie 1.7
@@ -59,12 +59,12 @@ map_3260_new_stdized <- map_3260_new %>%
   mutate(length_3260 = drop_units(st_length(geometry))) %>%
   ungroup() %>%
   st_drop_geometry() %>%
-   mutate(sac_streams = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
+   mutate(sac = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
                       ifelse(SBZ == "buiten", "outside", NA))) %>%
-    dplyr::select(sac_streams, length_3260)
+    dplyr::select(sac, length_3260)
            
 sac_3260 <- map_3260_new_stdized %>%
-  group_by(sac_streams) %>%
+  group_by(sac) %>%
   summarise(length_3260 = sum(length_3260)) %>%
   mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
   ungroup() %>%
@@ -73,7 +73,7 @@ sac_3260 <- map_3260_new_stdized %>%
 N_flanders <- round(sum(sac_3260$N), 0)
 
 N_sac <- (sac_3260 %>%
-  filter(sac_streams == "intersecting or downstream"))$N %>%
+  filter(sac == "intersecting or downstream"))$N %>%
   round(0)
 
 n_finite_flanders <- calc_finite_samplesize(N = N_flanders, n_infinite = n_flanders) %>%
@@ -83,20 +83,20 @@ n_finite_sac <- calc_finite_samplesize(N = N_sac, n_infinite = n_sac) %>%
   round(0)
 
 proportion_outside <- (sac_3260 %>%
-  filter(sac_streams =="outside"))$proportion_3260
+  filter(sac =="outside"))$proportion_3260
 
 n_finite_outside <- (n_finite_flanders * proportion_outside /100) %>%
   round(0)
 
-sample_size <- data.frame(sac_streams = c("intersecting or downstream", "outside"),
+sample_size <- data.frame(sac = c("intersecting or downstream", "outside"),
                       n_finite = c(n_finite_sac, n_finite_outside)) %>%
   as_tibble()
 
 sample_size_3260 <- sac_3260 %>%
-  left_join(sample_size, by = "sac_streams") %>%
+  left_join(sample_size, by = "sac") %>%
   dplyr::select(-N)
   
-write_vc(sample_size_3260, file = "mhq_streams_samplesize_v1_7", root = "../output", sorting = c("sac_streams"), strict = FALSE)
+write_vc(sample_size_strata, file = "mhq_streams_samplesize_v1_7", root = "../output", sorting = c("sac", "catchment_area"))
 ```
 
 Tabel \@ref(tab:tabelSteekproefgrootte) geeft het resultaat van de steekpreofgrootteberekening.
@@ -116,13 +116,13 @@ sample_size_3260 %>%
 
 ```{r}
 admin <- admin_orig %>%
-  mutate(#sampling_unit_code = str_c("1_4_", IDToonW),
+  mutate(sampling_unit_code = str_c("1_4_", IDToonW),
          assessment_year = jaar.monitoring,
          assessment_date = as.Date(datum.veldbezoek, format = "%d/%m/%Y"),
-         sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
-                      ifelse(SBZ == 0, "outside", SBZ)),
-         type_observed = doelhabitat) %>%
-  dplyr::select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
+         sac = ifelse(SBZ == 1, "intersecting or downstream",
+                      ifelse(SBZ == 0, "outside", NA)),
+         catchment_area = ifelse(SGO__km²_ == "<10", "< 10 km²", "> 10 km²")) %>%
+  dplyr::select(field_code = Veldcode, sampling_unit_code, catchment_area, sac,  assessment_year, assessment_date, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y)
 ```
 
 Er wordt gebruik gemaakt van onderstaande klassen:
@@ -138,39 +138,37 @@ admin %>%
 
 
 ```{r}
-assessments_3260 <- admin %>%
+assessments_3260_all <- admin %>%
   filter(klasse != "") %>%
   filter(!(klasse %in% c("niet meetellen (is vervangen)", "niet meetellen (2x bezocht)"))) %>%
-  mutate(inaccessability = ifelse(klasse == "uitval (ontoegankelijk)", "long term",
-                                  ifelse(klasse == "uitval (tijdelijk ontoegankelijk)", "short term", NA)),
-         is_type_target = ifelse(type_observed == "3260", TRUE,
-                                   ifelse(type_observed == "gh", FALSE, NA)),
-         segment_measurable = ! (klasse %in% c("uitval (ongeschikt)", "uitval (tijdelijk ongeschikt)")),
-         segment_measurable = ifelse(!is.na(inaccessability), NA, segment_measurable),
-         position_change = position_change == "ja")
+  mutate(inaccessability = ifelse(klasse %in% c("uitval (ongeschikt)", "uitval (ontoegankelijk)"), "long term",
+                                  ifelse(klasse == "uitval (tijdelijk ongeschikt)", "short term", NA)),
+           is_type_target = ifelse(klasse == "mon3260", TRUE,
+                                   ifelse(klasse == "uitval (gh)", FALSE, NA)),
+         position_change = is.na(sampling_unit_code))
 
-# assessments_3260_replaced <- admin %>%
-#   filter(str_detect(field_code, "_o") | field_code == "SchNe_04o") %>%
-#   mutate(field_code = str_replace(field_code, "_o", ""),
-#          field_code = ifelse(field_code == "SchNe_04o", "SchNe_04", field_code)) %>%
-#   dplyr::select(field_code, sac, sampling_unit_code, catchment_area)
-# 
-# assessments_3260_position_change <- assessments_3260_all %>%
-#   filter(position_change) %>%
-#   dplyr::select(-sac, -catchment_area, -sampling_unit_code) %>%
-#   left_join(assessments_3260_replaced, by = "field_code")
-# 
-# assessments_3260 <- assessments_3260_all %>%
-#   filter(!position_change) %>%
-#   bind_rows(assessments_3260_position_change)
-#   
+assessments_3260_replaced <- admin %>%
+  filter(str_detect(field_code, "_o") | field_code == "SchNe_04o") %>%
+  mutate(field_code = str_replace(field_code, "_o", ""),
+         field_code = ifelse(field_code == "SchNe_04o", "SchNe_04", field_code)) %>%
+  dplyr::select(field_code, sac, sampling_unit_code, catchment_area)
+
+assessments_3260_position_change <- assessments_3260_all %>%
+  filter(position_change) %>%
+  dplyr::select(-sac, -catchment_area, -sampling_unit_code) %>%
+  left_join(assessments_3260_replaced, by = "field_code")
+
+assessments_3260 <- assessments_3260_all %>%
+  filter(!position_change) %>%
+  bind_rows(assessments_3260_position_change)
+  
 ```
 
 
 ```{r}
 sample_assessments_3260 <- sample_frame_3260 %>%
   rename(sampling_unit_code = segment_id) %>%
-  left_join(dplyr::select(assessments_3260,  -sac_streams), by = "sampling_unit_code")
+  left_join(dplyr::select(assessments_3260, -catchment_area, -sac), by = "sampling_unit_code")
 ```
 
 
@@ -181,9 +179,9 @@ assessments_outside_sample_frame <- assessments_3260 %>%
   
 ```
 
-In volgende meetpunten (geselecteerd op basis van habitatkaart 1.4) werd habitattype 3260 waargenomen, ondanks dat ze niet overlappen met de habitatkaart v1.7. 
+In volgende meetpunten (geselecteerd op basis van habitatkaart 1.4) werd habitattype 3260 waargenomen, ondanks dat ze niet overlappen met de habitatkaart v1.8. 
 
-De punten werden nagekeken door An Leyssen. Ze bevatten geen habitat meer.
+Na te kijken. Fout in habitatkaart? Deze meetpunten weerhouden?
 
 ```{r}
 assessments_outside_sample_frame %>%
@@ -198,13 +196,12 @@ assessments_outside_sample_frame %>%
 
 ```{r}
 progress_3260 <- assessments_3260 %>%
-  group_by(sac_streams) %>%
+  group_by(sac) %>%
   summarise(n_assessed = sum(!is.na(is_type_target)),
             n_inaccessable = sum(!is.na(inaccessability)),
-            n_unmeasurable = sum(!segment_measurable),
             n_target_type = sum(is_type_target, na.rm = TRUE)) %>%
   ungroup() %>%
-  left_join(dplyr::select(sample_size_3260,  sac_streams, n_finite), by =c("sac_streams")) %>%
+  left_join(dplyr::select(sample_size_3260,  sac, n_finite), by =c("sac")) %>%
   mutate(detection_rate_pct = round(n_target_type/ n_assessed * 100, 1),
            progress_pct = round(n_target_type/n_finite * 100, 1))
               
@@ -214,8 +211,7 @@ progress_3260 <- assessments_3260 %>%
 Volgende tabel toont:
 
 - Aantal bezoeken (n_assessed)
-- Aantal meetpunten ontoegankelijk (n_inaccessable)
-- Aantal meetpunten niet geschikt voor bemonstering (n_unmeasurable)
+- Aantal meetpunten ontoegankelijk of ongeschikt (n_inaccessable)
 - Aantal meetpunten die in doelhabitat vallen (n_target_type)
 - Gewenste steekproefgrootte (n_finite)
 - Trefkans (detection_rate_pct)
@@ -229,42 +225,43 @@ progress_3260 %>%
 
 
 
-## Selectie af te werken meetpunten
+## Selectie prioritaire samples
 
-Onderstaande tabel toont het aantal op te meten meetpunten (n_to_do). Op basis van de trefkans berekenen we het aantal bezoeken dat hier (bij benadering) voor nodig is (n_visits). 
+We wensen om prioritair om binnen elk stratum minstens 50% van de steekproef af te werken (n_priority). Onderstaande tabel toont het aantal op te meten meetpunten (n_to_do_priority). Op basis van de trefkans berekenen we het aantal bezoeken dat hier (bij benadering) voor nodig is (n_visits_priority). 
 
 ```{r}
 
-sample_size_to_do <- progress_3260 %>%
-  mutate(n_to_do = pmax(0, n_finite - n_target_type),
-         n_visits = ceiling(n_to_do/detection_rate_pct * 100)) %>%
-  dplyr::select( sac_streams, n_to_do, n_visits)
+sample_size_priotity <- progress_3260 %>%
+  mutate(n_priority = ceiling(n_finite/2),
+         n_to_do_priority = pmax(0, n_priority - n_target_type),
+         n_visits_priority = ceiling(n_to_do_priority/detection_rate_pct * 100)) %>%
+  dplyr::select( sac, n_priority, n_to_do_priority, n_visits_priority)
 
 ```
 
 
 ```{r}
-sample_size_to_do %>%
+sample_size_priotity %>%
   kable() %>%
   kable_styling()
 ```
 
-
+## Selectie prioritaire meetpunten
 
 Onderstaande kaart toont de prioritair af te werken meetpunten. De rode punten liggen net buiten de habitatkaart, maar het 100m-segment zou wel habitat moeten bevatten.
 
 ```{r}
-sample_to_do <- sample_assessments_3260 %>%
-  left_join(sample_size_priotity, by = c("sac_streams")) %>%
+sample_priority <- sample_assessments_3260 %>%
+  left_join(sample_size_priotity, by = c("sac")) %>%
   filter(is.na(assessment_date)) %>%
-  group_by(sac_streams, grts_ranking) %>%
+  group_by(sac, grts_ranking) %>%
   mutate(volgorde_1 = rank(grts_ranking, ties.method = "random")) %>%
   ungroup() %>%
-  group_by(sac_streams) %>%
+  group_by(sac) %>%
   mutate(volgorde_2 = rank(grts_ranking, ties.method = "min")) %>%
   ungroup() %>%
   mutate(volgorde = volgorde_2 + (volgorde_1 - 1) * 1000000,
-         to_do = volgorde <= n_visits)
+         priority = volgorde <= n_visits_priority)
   
 
 ```
@@ -273,13 +270,13 @@ sample_to_do <- sample_assessments_3260 %>%
 
 ```{r, warning= FALSE}
 
-sample_units_to_do <- sample_to_do %>%
-  filter(to_do) %>%
-  dplyr::select(sampling_unit_code, sac_streams,  grts_ranking, volgorde, x, y) %>%
+sample_units_priority <- sample_priority %>%
+  filter(priority) %>%
+  dplyr::select(sampling_unit_code, river_name, sac, catchment_area, wl_code, grts_ranking, volgorde, x, y) %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) %>%
   group_by(sampling_unit_code) %>%
   mutate(distance_to_map3260 = round(min(st_distance(geometry, map_3260_new)), 0),
-         in_map3260 = drop_units(distance_to_map3260) < 10) %>%
+         in_map3260 = distance_to_map3260 < 10) %>%
   ungroup()
   
 ```
@@ -287,7 +284,7 @@ sample_units_to_do <- sample_to_do %>%
 
 ```{r}
 
-sample_units_to_do %>%
+sample_units_priority %>%
   st_transform(crs = 4326) %>%
   mutate(color_marker = ifelse(in_map3260, "blue", "red")) %>%
   leaflet() %>%
@@ -298,34 +295,16 @@ sample_units_to_do %>%
 ```
 
 
-## Standardise output
-
-
-
+Het bestand 'meetpuntent3260_prioritair.csv' bevat de geselecteerde meetpunten.
 
 ```{r}
-sample_assessments_3260 <- sample_assessments_3260 %>%
-  filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do$sampling_unit_code) %>%
-  mutate(grts_ranking_draw = grts_ranking,
-         sampling_unit_code = str_c(sampling_unit_code, "_3260"),
-         type_target = "3260",
-         scheme = "MHQ3260",
-         distance = round(sqrt((x - x_assessment)^2 + (y - y_assessment)^2), 0))
-
-grts_master <- grts_master %>%
-  st_as_stars()
-  
-projection(grts_master) <- st_crs()
-
-sample_assessments_3260_replaced_sf <- sample_assessments_3260 %>%
-  filter(position_change) %>%
-  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
-  st_join(grts_master)
-
-
-         
+sample_units_priority %>%
+  mutate(x = st_coordinates(.)[, 1],
+         y = st_coordinates(.)[, 2]) %>%
+  st_drop_geometry() %>%
+  arrange(sac, volgorde) %>%
+  dplyr::select(-distance_to_map3260, -in_map3260) %>%
+  write.csv2("../output/meetpuntent3260_prioritair_versie2020-05-20.csv", row.names = FALSE)
 ```
-
-
 
 
