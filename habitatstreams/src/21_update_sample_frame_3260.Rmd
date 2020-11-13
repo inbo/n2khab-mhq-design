@@ -80,7 +80,7 @@ st_crs(segments_vha) <- st_crs(vha)
 - Next we select the points that are not within the old map of 3260 (version 1.4), because for this old map we have already selected points every 100 meter and we want to keep the previously selected points.
 
 - We also want to avoid that the newly selected point on the vha linestrings are closer than 100 meter to the previously selected points when both are in the same waterbody. 
-We perform a quick and dirty approach, by taking a (linear) buffer of 50 meter along the previously selected points. So to avoid to much complexity, we do not calculate distances along the river linestrings. 
+We take a (linear) buffer of 50 meter along the previously selected points. So to avoid to much complexity, we do not calculate distances along the river linestrings. 
 We leave out the newly selected points that are within a buffer of a previuosly selected point that is located within the same waterbody (defined bij wl_code).
 
 - Note that the wl_code assigned to the previously selected points are outdated and have to be updated based on an overlay with vha.
@@ -309,10 +309,7 @@ streams_segments_all %>%
 
 
 
-```{r}
-sample_frame_3260 %>%
-  dplyr::select(segment_id = sampling_unit_code, unit_adress = grts_ranking)
-```
+
 
 
 

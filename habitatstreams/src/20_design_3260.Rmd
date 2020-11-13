@@ -6,14 +6,13 @@ Following code reproduces the original design of the 3260 monitoring scheme base
 
 We used version 1.4 of habitatstreams as the basis for the sample frame. This version is not yet available on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the map and also information on the different strata which are part of the design:
 
-* postion relative to sac:
-** intersects with sac or downstream of sac
-** outside of sac (and not downstream of sac)
-* size of catchment area
-** < 10 km²
-** > 10 km²
++ postion relative to sac:
+  + intersects with sac or downstream of sac
+  + outside of sac (and not downstream of sac)
++ size of catchment area
+  + smaller than 10 km²
+  + larger than 10 km²
 
-To do: reproduce determination of the strata information
 
 ```{r}
 
@@ -237,7 +236,7 @@ habitatmap_streams_segments <-  segments_3260_final %>%
          y = (st_coordinates(segments_3260_final))[,2]) %>%
   dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
   
-write_vc(habitatmap_streams_segments, file = "samplingframe_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
+#write_vc(habitatmap_streams_segments, file = "samplingframe_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
 
 ```
 
@@ -268,8 +267,23 @@ check_unique <- sample_3260 %>%
   mutate(n = n()) %>%
   ungroup()
 
-write_vc(sample_3260, file = "sample_habitatstreams_v1_4", root = "../output", sorting = c("sac", "catchment_area", "grts_ranking"), strict = FALSE)
+#write_vc(sample_3260, file = "sample_habitatstreams_v1_4", root = "../output", sorting = c("sac", "catchment_area", "grts_ranking"), strict = FALSE)
 ```
 
 Note: there are 2 segment points that are located in the same grts-master cell.
+
+```{r}
+sample_original <- read_sf("../data/streams_original", "steekproef_3260_v2015-05-28", crs = 31370) %>%
+  dplyr::select(Volgorde, RankingGRT, naam, SBZ, starts_with("SGO"), ID) %>%
+  rename(catchment_area = SGO__km.U.00B2._)
+
+check <- sample_original %>%
+  group_by(SBZ, catchment_area) %>%
+  summarise(n = n()) %>%
+  ungroup()
+```
+
+
+
+
 

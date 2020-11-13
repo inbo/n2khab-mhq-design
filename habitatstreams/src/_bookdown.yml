@@ -1,4 +1,4 @@
-book_filename: "mhq_design.Rmd"
+book_filename: "mhq_design_evaluation.Rmd"
 output_dir: "../output"
 language:
   label:

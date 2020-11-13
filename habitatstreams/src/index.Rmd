@@ -1,7 +1,7 @@
 
 
 ---
-title: "mhq design"
+title: "Design and evaluation of monitoring habitat quality scheme for streams "
 # subtitle: "x"
 date: "`r lubridate::now()`"
 link-citations: true
@@ -39,13 +39,15 @@ output:
 
 ```{r setup, include=FALSE}
 
-#devtools::install_github("https://github.com/inbo/n2khab", ref ="crs")
+
+#devtools::install_github("https://github.com/inbo/n2khab")
 
 options(stringsAsFactors = FALSE,
         scipen = 999, 
         digits = 15)
 library(sf)
 library(git2rdata)
+library(stars)
 library(raster)
 library(tidyverse)
 library(knitr)
@@ -63,8 +65,9 @@ options(stringsAsFactors = FALSE)
 
 opts_chunk$set(
   echo = TRUE,
-  dpi = 300,
-  warning = FALSE
+  cache = TRUE ,
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
