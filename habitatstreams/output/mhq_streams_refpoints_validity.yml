@@ -1,0 +1,24 @@
+..generic:
+  git2rdata: 0.2.1
+  optimize: yes
+  NA string: NA
+  sorting:
+  - sampling_unit_code
+  - point_code
+  hash: 1b43570cd40d21e0f8f7a2223e9bcc5ef8e92439
+  data_hash: 053f83125c8f1557841ce6d17bf9ce37761d6677
+scheme:
+  class: character
+sampling_unit_code:
+  class: character
+point_code:
+  class: character
+date:
+  class: Date
+  origin: '1970-01-01'
+is_valid:
+  class: logical
+is_valid_type:
+  class: logical
+is_valid_refpoint:
+  class: logical

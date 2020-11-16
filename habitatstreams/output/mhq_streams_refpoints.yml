@@ -1,0 +1,40 @@
+..generic:
+  git2rdata: 0.2.1
+  optimize: yes
+  NA string: NA
+  sorting:
+  - sampling_unit_code
+  - point_code
+  hash: dc77da591be7b543b4dab3bad3be841f250c9dfa
+  data_hash: 6c8a764699616efa42a419e59a3acf30520c65b7
+scheme:
+  class: character
+sampling_unit_code:
+  class: character
+point_code:
+  class: character
+type_target:
+  class: character
+sac_streams:
+  class: factor
+  labels:
+  - intersecting or downstream
+  - outside
+  index:
+  - 1
+  - 2
+  ordered: no
+grts_ranking:
+  class: numeric
+grts_ranking_draw:
+  class: numeric
+legacy_site:
+  class: logical
+x:
+  class: numeric
+'y':
+  class: numeric
+db_ref:
+  class: character
+segment_id:
+  class: character
