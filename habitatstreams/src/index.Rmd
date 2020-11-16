@@ -38,10 +38,16 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-
+library(knitr)
+opts_chunk$set(
+  echo = TRUE,
+  cache = TRUE ,
+  warning = FALSE,
+  message = FALSE
+)
 
 #devtools::install_github("https://github.com/inbo/n2khab")
-
+options(rgdal_show_exportToProj4_warnings = "none")
 options(stringsAsFactors = FALSE,
         scipen = 999, 
         digits = 15)
@@ -50,7 +56,7 @@ library(git2rdata)
 library(stars)
 library(raster)
 library(tidyverse)
-library(knitr)
+
 library(n2khab)
 library(kableExtra)
 library(units)
@@ -61,14 +67,10 @@ library(units)
 library(renv)
 
 
+
 options(stringsAsFactors = FALSE)
 
-opts_chunk$set(
-  echo = TRUE,
-  cache = TRUE ,
-  warning = FALSE,
-  message = FALSE
-)
+
 ```
 
 

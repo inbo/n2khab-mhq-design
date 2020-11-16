@@ -141,6 +141,8 @@ vha_difference_buffer <- vha_difference %>%
 
 - Next we combine the newly selected vha points with the previously selected point on the old 3260 map. We also add the strata information (position relative to sac) that is part of the old 3260 map.
 
+- Finally we assign a grts-ranking to each vha point based on to the grts-master
+
 ```{r}
 map_3260_old_strata <- map_3260_old %>%
   mutate(sac_old = ifelse(SBZ == "sa", "downstream",
@@ -167,6 +169,73 @@ vha_segments_combined <- segments_3260_old_sf %>%
   # st_write(dsn = "../output/check2.gpkg", "vha_segments_combined", driver ="GPKG")
 ```
 
+## Check if points are located within Flanders and overlap with grts-master  
+
+
+```{r}
+
+flanders <- read_admin_areas()
+
+streams_segments_no_ranking <- vha_segments_combined %>%
+  rename(river_name = name) %>%
+  filter(is.na(grts_ranking)) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(flanders) %>%
+  mutate(in_flanders = !is.na(name),
+         color_in_flanders = ifelse(in_flanders, "blue", "red"))
+
+overview_missing_ranking <-  vha_segments_combined %>%
+    rename(river_name = name) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(flanders) %>%
+  st_drop_geometry() %>%
+  mutate(in_flanders = !is.na(name),
+         in_grts_master = !is.na(grts_ranking)) %>%
+  group_by(in_flanders, in_grts_master) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+grts_border <- grts_master %>%
+  mask(st_buffer(streams_segments_no_ranking, 32)) %>%
+  rasterToPolygons() %>%
+  st_as_sf()
+
+n_flanders_missing <- (overview_missing_ranking %>%
+  filter(in_flanders, !in_grts_master))$n
+
+n_flanders_tot <- (overview_missing_ranking %>%
+  filter(in_flanders))$n %>%
+  sum()
+
+percent_flanders_missing <- round(n_flanders_missing/n_flanders_tot * 100, 2)
+
+```
+
+The table below gives an overview of the location of the vha points. `r n_flanders_missing` vha points are located within Flanders but do not overlap with the grts master. 
+This is because the grts master only contains cells for which the centroid is located within Flanders. 
+Therefore some parts of Flanders at the borders are not covered by the grts master. 
+However, only `r percent_flanders_missing` % of vha points within Flanders do not overlap with the grts master.     
+
+```{r}
+overview_missing_ranking %>%
+  kable() %>%
+  kable_styling()
+```
+
+The map below show the vha points that do not overlap with the grts master. 
+The points outside Flanders are red. 
+The cells within a distance of 32 meter of the vha points are shown as well (zoom in to see them).
+
+```{r}
+streams_segments_no_ranking %>%
+  st_transform(crs = 4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(color = ~color_in_flanders) %>%
+  addPolygons(data = st_transform(grts_border, crs = 4326)) %>%
+  addPolygons(data = st_transform(flanders, crs = 4326), fill = FALSE, color = "black")
+```
+
 
 ## Create updated sample frame for 3260
 
@@ -184,18 +253,12 @@ map_3260_new_buffer <- map_3260_new %>%
   st_combine() %>%
   st_geometry()
 
-#st_write(map_3260_new_buffer, "../output/check.gpkg", "map_3260_new_buffer", driver = "GPKG")
-
 map_3260_new_sac <- map_3260_new %>%
   st_buffer(10) %>%
   dplyr::select(SBZ)
 
 segments_3260_new_intersect <- vha_segments_combined %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) %>%
-  #mutate(check = st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
-  # st_join(map_3260_new_buffer, largest = TRUE)
-  # st_drop_geometry()
-  # filter(st_intersects(geometry, map_3260_new_buffer, sparse = FALSE)) %>%
   st_join(map_3260_new_sac, largest = TRUE) %>%
   filter(!is.na(SBZ))
 
@@ -233,9 +296,13 @@ segments_3260_new <- segments_3260_new_extra %>%
   dplyr::select(segment_code = id, river_name = name, wl_code, wl_code_old, grts_ranking, sac, catchment_area)
 ```
 
+Some of the points have no grts-ranking yet, as they do not overlap with the grts master. 
+We keek the points in the sample frame when they are located within Flanders or when they are located in the Meuse.
+The Meuse forms part of the boundary between Flanders and the Netherlands and shifts from the Flemish shore to the Dutch shore as can be seen in the map above (when you zoom in). 
+Therefore we also want to keep the points in the Meuse that are located in the Netherlands because the actual border is located on the Flemish shore.
+We assign the grts-ranking of the closest cell to these points.
 
 ```{r}
-
 segments_3260_border <- segments_3260_new %>%
   filter(is.na(grts_ranking))
 
@@ -249,16 +316,13 @@ grts_border <- grts_master %>%
 
 st_crs(grts_border) <- 31370
 
-#write_sf(grts_border, dsn = "../output/grts_border4", layer = "check_grts_border", driver = "ESRI Shapefile")
-
 segments_3260_border_grts <- segments_3260_border %>%
  st_join(grts_border, join = st_nearest_feature) %>%
-  group_by(segment_code) %>%
-  mutate(dist = min(drop_units(st_distance(geometry, grts_border)))) %>%
-  ungroup() %>%
-  mutate(grts_ranking = GRTSmaster_habitats) %>%
-  # filter(dist < 32 | name == "MAAS") %>%
-  dplyr::select(-GRTSmaster_habitats, -dist) 
+  st_join(flanders) %>%
+  select(-grts_ranking) %>%
+  rename(grts_ranking = GRTSmaster_habitats) %>%
+  filter(!is.na(name) | river_name == "Maas") %>%
+  select(-name)
 
 segments_3260_new_addgrts <- segments_3260_new %>%
   filter(!is.na(grts_ranking)) %>%
@@ -270,9 +334,10 @@ sample_frame_3260 <- segments_3260_new_addgrts %>%
   unique() %>%
   rename(segment_id = segment_code) %>%
   mutate(segment_id = str_replace(segment_id, "old", "1_4"),
-         segment_id = str_replace(segment_id, "new", "1_7")) %>%
+         segment_id = str_replace(segment_id, "new", "1_7"),
+         x = round(x,2),
+         y = round(y, 2)) %>%
   dplyr::select(segment_id, grts_ranking, sac_streams = sac, x, y)
-
 
 check <- sample_frame_3260 %>%
   st_drop_geometry() %>%
@@ -284,27 +349,50 @@ check <- sample_frame_3260 %>%
 sample_frame_3260 <- sample_frame_3260 %>%
   filter(!(segment_id == "1_4_1873" & sac_streams == "outside")) %>%
   filter(!(segment_id == "1_7_17866" & sac_streams == "outside"))
-  
-
-write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "samplingframe_habitatstreams_v1_7", sorting = "segment_id", strict = FALSE)
-
-st_write(sample_frame_3260, "../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_v1_7", driver = "GPKG", append = TRUE, delete_layer = TRUE)
 
 streams_segments_all <- vha_segments_combined %>%
   mutate(segment_id = str_replace(id, "old", "1_4"),
         segment_id = str_replace(segment_id, "new", "1_7") ,
-        name = str_to_lower(name)) %>%
-  dplyr::select(segment_id, river_name = name, wl_code, x, y, grts_ranking) 
+        name = str_to_lower(name),
+        x = round(x, 2),
+        y = round(y, 2)) %>%
+  dplyr::select(segment_id, grts_ranking, river_name = name, wl_code, x, y) 
 
 check_unique_id <- streams_segments_all %>%
   group_by(segment_id) %>%
   mutate(n = n()) %>%
   ungroup() %>%
   filter(n > 1)
+```
+
+The segment starting points that form the sampling frame of 3260 is exported as a table named 'samplingframe_habitatstreams_v1_7'.
+Below we show some rows as an example.
+
+```{r}
+sample_frame_3260 %>%
+  arrange(grts_ranking) %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+```
+
+The starting points of all vha segments are exported as a table named 'vha_segments', see some example rows below.
+
+```{r}
+streams_segments_all %>%
+  arrange(grts_ranking) %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+```
+
+```{r}
+write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "samplingframe_habitatstreams_v1_7", sorting = "segment_id", strict = FALSE)
+
+st_write(sample_frame_3260, "../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_v1_7", driver = "GPKG", append = TRUE, delete_layer = TRUE)
 
 streams_segments_all %>%
   write_vc(root =  "../output", file = "vha_segments", sorting = c("segment_id", "grts_ranking", "river_name"), strict = FALSE)
-
 ```
 
 

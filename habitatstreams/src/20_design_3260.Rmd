@@ -51,7 +51,7 @@ n_flanders <- 80
 n_sac <- 170
 ```
 
-We choose a initial sample size of ´r n_flanders´ in Flanders and we oversample within sac and downstream of sac until a sample size of 170 is reached. The sample is distributed over catchment area classes '< 10 km²' and '> 10 km²' proportional to the length of 3260 in each class.
+We choose an initial sample size of `r n_flanders` in Flanders and we oversample within sac and downstream of sac until a sample size of 170 is reached (for sac + downstream stratum). The sample is distributed over catchment area classes '< 10 km²' and '> 10 km²' proportional to the length of 3260 in each class.
 
 
 ```{r}
@@ -117,11 +117,11 @@ sample_size_strata %>%
   kable_styling()
 ```
 
-Note: in the report Westra et al. (2014) an error was made when distributing the sample size over the different strata. So the sample size for each strata is different here, but correct.
+Note: in the report Westra et al. (2014) an error was made when distributing the sample size over the different strata. So the sample size for each stratum is different here, but correct.
 
 ## Divide 3260 map into 100 m segments and assign GRTS-ranking each segment 
 
-The sample unit for 3260 is a 100 meter segment. Therefore we select points on the linesegments of the 3260 map every 100 meter using spsample. Each selected point corresponds with the beginning of a sample unit.
+The sampling unit for 3260 is a 100 meter segment. Therefore we select points on the linesegments of the 3260 map every 100 meter using spsample. Each selected point corresponds with the beginning of a sampling unit.
 
 ```{r}
 tot_length_3260 <- sum(sac_3260$length_3260)
@@ -149,7 +149,8 @@ segments_3260_2 <- segments_3260 %>%
 
 Next we assign a GRTS-ranking to each point by overlaying it with the [GRTS-master sample](https://zenodo.org/record/2682323#.XpgXMcgzaUk). However, some (parts of) streams are situated on the border with the Netherlands and as a consequence some linesegments that represent these streams are situated outside Flanders. This means there is no overlap with the GRTS-master. In this case, we assign the GRTS-ranking of the closest grid-cell to the point.
 
-Note: a better solution would be to extend the GRTS-master sample outside the borders of Flanders for approximately 100 meter. However we follow the aproach that was originally used. 
+Note: a better solution would be to restore the GRTS-master sample outside the borders of Flanders to its original state (however that info is not available anymore and it would take quite some effort to generate GRTS-addresses, taking into account the existing ones). 
+However we follow the aproach that was originally used.  
 
 In a next step, we deselect all points with a distance of more than 32 meters to the center of the nearest GRTS-master cell, except for point on the Meuse river. 
 
@@ -225,7 +226,7 @@ check_points <- are_equal(compare1, compare2)
 
 ```
 
-The segment points for the 3260 type and the corresponding grts-ranking is exported as a table. 
+The segment points for the 3260 type and the corresponding grts-ranking is exported as a table named 'samplingframe_habitatstreams_v1_4'. 
 
 ```{r}
 
@@ -243,6 +244,7 @@ habitatmap_streams_segments <-  segments_3260_final %>%
 ## Sample selection
 
 Finally, we select in each stratum the number of samples required based on the grts-ranking.
+The result is exported as a table named 'sample_habitatstreams_v1_4'.
 
 ```{r}
 

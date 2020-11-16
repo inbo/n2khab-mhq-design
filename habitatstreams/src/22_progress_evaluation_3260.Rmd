@@ -166,13 +166,11 @@ assessments_3260 <- admin %>%
 #   
 ```
 
-
 ```{r}
 sample_assessments_3260 <- sample_frame_3260 %>%
   rename(sampling_unit_code = segment_id) %>%
   left_join(dplyr::select(assessments_3260,  -sac_streams), by = "sampling_unit_code")
 ```
-
 
 ```{r}
 assessments_outside_sample_frame <- assessments_3260 %>%
@@ -261,11 +259,16 @@ sample_assessments_3260_not_valid <- sample_assessments_3260_not_valid %>%
          in_sample_rapport = sampling_unit_code %in% sample_rapport$sampling_unit_code)
 ```
 
-Onderstaande tabel geeft een overzicht van de opgemeten steekproefeenheden die niet in de steekproef versie 1.7 (volgens het steekproefkader versie 1.7) zitten. Drie daarvan zitten wel in de steekproef versie 1.4 (volgens het steekproefkader versie 1.7). Deze zitten niet meer in de laatste versie de steekproef omdat het steekproefkader is gewijzigd. Twee punten zitten enkel in de steekproef die getrokken werd op basis van het rapport (Westra et al., 2014). Hierin gebeurde er een fout bij de verdeling van de gewenste steekproefgrootte over de strata. Deze fout is nu rechtgezet. De impact van deze fout is dus relatief beperkt. 
+Onderstaande tabel geeft een overzicht van de opgemeten steekproefeenheden die niet in de steekproef versie 1.7 (volgens het steekproefkader versie 1.7) zitten. Drie daarvan zitten wel in de steekproef versie 1.4 (volgens het steekproefkader versie 1.7). 
+Deze zitten niet meer in de laatste versie de steekproef omdat het steekproefkader is gewijzigd. 
+Twee punten zitten enkel in de steekproef die getrokken werd op basis van het rapport (Westra et al., 2014). 
+Hierin gebeurde er een fout bij de verdeling van de gewenste steekproefgrootte over de strata. Deze fout is nu rechtgezet. 
+De impact van deze fout is dus relatief beperkt. 
 
-Omdat de steekproefeenheden correct werden opgemeten volgens de toen geldende instructies, zullen we deze opnemen in de steekproef versie 1.7. We geven dit aan door te werken met een variabele 'grts_ranking_draw' die de grts_ranking weergeeft op basis waarvan de steekproeftrekking gebeurt. We geven deze punten dan een zeer lage waarde voor grts_ranking_draw zodat ze met zekerheid opgenomen worden in de steekproef. Zie verder.
+Omdat de steekproefeenheden correct werden opgemeten volgens de toen geldende instructies, zullen we deze opnemen in de steekproef versie 1.7.
 
-We moeten er wel voor waken dat de steekproef voldoende representatief blijft voor de huidige doelpopulatie. Maar we stellen voor om minstens twee opmetingen te doen per steekproefeenheid vooraleer verouderde steekproefeenheden (die niet meer geselecteerd zouden worden volgens de laatste versie van het steekproefkader) te vervangen.
+We moeten er wel voor waken dat de steekproef voldoende representatief blijft voor de huidige doelpopulatie. 
+Maar we stellen voor om minstens twee opmetingen te doen per steekproefeenheid vooraleer verouderde steekproefeenheden (die niet meer geselecteerd zouden worden volgens de laatste versie van het steekproefkader) te vervangen.
 
 ```{r}
 sample_assessments_3260_not_valid %>%
@@ -298,8 +301,6 @@ sample_size_to_do %>%
   kable() %>%
   kable_styling()
 ```
-
-
 
 Onderstaande kaart toont de prioritair af te werken meetpunten. De rode punten liggen net buiten de habitatkaart, maar het 100m-segment zou wel habitat moeten bevatten.
 
@@ -355,7 +356,7 @@ We standaardiseren het overzicht van de steekproefeenheden en de opmetingen op e
 ```{r}
 sample_assessments_3260_2 <- sample_assessments_3260 %>%
   filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do$sampling_unit_code) %>%
-  mutate(grts_ranking_draw = ifelse(sampling_unit_code %in% sample_assessments_3260_not_valid$sampling_unit_code, rank(grts_ranking), grts_ranking),
+  mutate(grts_ranking_draw =grts_ranking,
          type_target = "3260",
          scheme = "MHQ3260",
          distance = round(sqrt((x - x_assessment)^2 + (y - y_assessment)^2), 0)) %>%
@@ -385,19 +386,24 @@ sample_assessments_3260_original <- sample_assessments_3260_2 %>%
   
 sample_assessments_3260_update <- sample_assessments_3260_original %>%
   bind_rows(sample_assessments_3260_replaced) %>%
-  mutate(sampling_unit_code = str_c(sampling_unit_code, "_3260"))
+  mutate(segment_id = sampling_unit_code,
+         sampling_unit_code = str_c(grts_ranking, "_3260"),
+         x = round(x, 2),
+         y = round(y, 2),
+         sac_streams = factor(sac_streams))
        
 ```
 
 
 ### mhq_streams_refpoints
 
-De tabel 'mhq_streams_refpoints' geeft een overzicht van de zogenaamde referentiepunten voor alle steekproefeenheden in het meetnet voor habitattype 3260. Elke steekproefeenheid heeft een referentiepunt waar naar toe genavigeerd wordt om de meting uit te voeren. Bij stromende wateren is het referentiepunt het startpunt van het 100 meter segment (en meer specifiek het meest stroomopwaarts gelegen punt van het segment).
+De tabel 'mhq_streams_refpoints' geeft een overzicht van de zogenaamde referentiepunten voor alle steekproefeenheden in het meetnet voor habitattype 3260. Elke steekproefeenheid heeft een referentiepunt waar naar toe genavigeerd wordt om de meting uit te voeren. Bij stromende wateren is het referentiepunt het startpunt van het 100 meter segment (en meer specifiek het meest stroomafwaarts gelegen punt van het segment).
 
 De tabel bestaat uit volgende variabelen:
 
 + scheme: code voor het meetnet;
 + sampling_unit_code: code voor de steekproefeenheid;
++ segment_id: id van het riviersegment;
 + point_code: code voor het referentiepunt;
 + type_target: doelhabitat;
 + sac_streams: positie t.o.v. speciale beschermingszone (SBZ) met onderscheid tussen:
@@ -413,10 +419,22 @@ De tabel bestaat uit volgende variabelen:
 mhq_streams_refpoints <- sample_assessments_3260_update %>%
   mutate(legacy_site = FALSE,
          db_ref = field_code) %>%
-  select(scheme, sampling_unit_code, point_code, type_target, sac_streams, grts_ranking, grts_ranking_draw, legacy_site, x, y, db_ref) %>%
+  select(scheme, sampling_unit_code, segment_id, point_code, type_target, sac_streams, grts_ranking, grts_ranking_draw, legacy_site, x, y, db_ref) %>%
   arrange(grts_ranking_draw, point_code)
+```
 
-write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+Als voorbeeld tonen we de eerste zes rijen van de tabel.
+
+```{r}
+mhq_streams_refpoints %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+```{r}
+write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE)
 ```
 
 ### mhq_streams_refpoints_validity
@@ -438,14 +456,26 @@ De tabel bestaat uit volgende variabelen:
 
 ```{r}
 mhq_streams_refpoints_validity <- sample_assessments_3260_update %>%
+  arrange(grts_ranking_draw, point_code) %>%
   mutate(is_valid_type = is_type_target,
          is_valid_refpoint = segment_measurable & is.na(inaccessible),
          is_valid = is_valid_type & is_valid_refpoint) %>%
-  select(scheme, sampling_unit_code, point_code, date = assessment_date, is_valid, is_valid_type, is_valid_refpoint)
-
-write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+  select(scheme, sampling_unit_code, point_code, date = assessment_date, is_valid, is_valid_type, is_valid_refpoint) 
 ```
 
+Als voorbeeld tonen we de eerste zes rijen van de tabel.
+
+```{r}
+mhq_streams_refpoints_validity %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+```{r}
+write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+```
 
 ### mhq_streams_assessments
 
@@ -453,6 +483,7 @@ De tabel 'mhq_streams_assessments' geeft een overzicht van de beoordelingen (ass
 
 De tabel bevat volgende variabelen:
 
++ segment_id
 + point_code
 + type_target
 + is_type_target: geeft aan of de steekproefeenheid al dan niet doelhabitat bevat
@@ -471,13 +502,21 @@ mhq_streams_assessments <- sample_assessments_3260_update %>%
   mutate(fieldwork_team = "INBO",
          assessment_source = "field assessment",
          type_observed = ifelse(type_observed == "ongekend (geen opname)", NA, type_observed)) %>%    
-  select(point_code, type_target, is_type_target, type_observed, inaccessible, measurable = segment_measurable, assessment_date, assessment_source, fieldwork_team, x, y) 
+  select(segment_id, point_code, type_target, is_type_target, type_observed, inaccessible, measurable = segment_measurable, assessment_date, assessment_source, fieldwork_team, x, y) 
 
-write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"))
+```
+
+```{r}
+mhq_streams_assessments %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+
 ```
 
 
-
-
+```{r}
+write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"), strict = FALSE)
+```
 
 
