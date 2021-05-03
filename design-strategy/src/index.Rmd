@@ -39,14 +39,21 @@ output:
 
 ```{r setup, include=FALSE}
 
-#devtools::install_github("https://github.com/inbo/n2khab", ref ="crs")
+# remotes::install_github("inbo/n2khab",
+#                         build_vignettes = TRUE,
+#                         upgrade = TRUE)
+
+# devtools::install_github("jmt2080ad/polylineSplitter")
 
 options(stringsAsFactors = FALSE,
         scipen = 999, 
         digits = 15)
+
+
+library(plyr)
 library(sf)
+library(polylineSplitter)
 library(git2rdata)
-library(tidyverse)
 library(knitr)
 library(n2khab)
 library(kableExtra)
@@ -54,17 +61,21 @@ library(units)
 library(raster)
 library(assertthat)
 library(leaflet)
+library(crosstalk)
 library(pwr)
 library(TrialSize)
 library(INBOtheme)
+library(tidyverse)
 
 options(stringsAsFactors = FALSE)
+options(knitr.kable.NA = '')
 
 opts_chunk$set(
   echo = TRUE,
   dpi = 300,
   warning = FALSE
 )
+
 ```
 
 
