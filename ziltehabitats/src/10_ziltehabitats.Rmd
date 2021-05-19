@@ -1,0 +1,207 @@
+
+# Monitorng habitatkwaliteit Natura 2000
+
+## Overzicht monitoringaanpak per habitat(sub)type
+
+```{r}
+fileman_up("n2khab-mhq-design")
+
+samplesize_mhq_detailed <- read_vc(root = fileman_up("n2khab-mhq-design"), "design-strategy/output/samplesize_mhq_terr_v2021")
+
+samplesize_mhq <- samplesize_mhq_detailed %>%
+      mutate(samplesize = ceiling(n_finite_flanders + n_extra_sac + n_extra_subtype),
+             samplesize_type = ceiling(n_finite_flanders + n_extra_sac),
+             extra_subtype = ceiling(n_extra_subtype)) %>%
+  select(type, sample_type, area_polygons_subtype_sac, area_subtype_sac, sac, samplesize, samplesize_type, extra_subtype) %>%
+  filter(str_sub(type, 1, 2) == "13")
+
+area_kartering <- (samplesize_mhq %>%
+  filter(!sample_type))$area_polygons_subtype_sac %>%
+  sum() %>%
+  round()
+
+```
+
++ Enkel een meetnetaanpak voor habitattype 1330. Voor andere habitattypen bepalen we de kwaliteit in combinatie met een habitatkartering.
+
++ Om beter zicht te krijgen op trends in habitatkwaliteit hebben we gekozen voor een meetcyclus van 6 jaar (ipv oorspronkelijke 12 jaar), maar ook een kleinere totale steekproefgrootte om de meetlast per jaar constant te houden.  
+
++ Team Biotoopdiversiteit bemonsteren meetpunten van habitatsubtype 1330_hpr.
+
++ Team Estuaria bemonsteren de meetpunten van habitatsubtype 1330_da in het Scheldegebied. 
+
++ Totale oppervlakte kartering habitatkwaliteit: `r area_kartering` hectare.
+
+
+
+
+```{r}
+samplesize_mhq %>%
+  mutate(monitoringaanpak = ifelse(sample_type, "meetnet", "kartering"),
+         sac = ifelse(sac, "binnen sbzh", "buiten sbzh"),
+         meetcyclus = "6 jaar",
+         area_polygons_subtype_sac = round(area_polygons_subtype_sac, 2),
+         area_subtype_sac = round(area_subtype_sac, 2)) %>%
+  select(habitat = type, sbzh = sac, monitoringaanpak, "oppervlakte polygonen (ha)" = area_polygons_subtype_sac, "oppervlakte habitat (ha)" = area_subtype_sac,   meetcyclus, steekproefgrootte = samplesize_type) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(columns = c(1, 2))
+```
+
+## Verdeling 1330_da over gebieden
+
+```{r}
+gebieden_1330_da <- read_sf("../data/gebieden_1330_da.shp") %>%
+  st_transform(31370)
+
+sac_sf <- read_admin_areas(dsn = "sac") %>%
+  select(sac_name) %>%
+  group_by(sac_name) %>%
+  summarise(n_pol = n()) %>%
+  ungroup()
+
+habmap <- read_habitatmap_terr()
+
+habmap_type_1330_da <- habmap$habitatmap_terr_types %>%
+  filter(type == "1330_da")
+
+habmap_pol_1330_da <- habmap$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% habmap_type_1330_da$polygon_id) %>%
+  st_join(gebieden_1330_da) %>%
+  st_join(sac_sf) %>%
+  mutate(sac = !is.na(sac_name)) %>%
+  mutate(area = st_area(geom),
+         area_ha = drop_units(area)/10000) %>%
+  ungroup()
+
+type_1330_da_gebieden <- habmap_type_1330_da %>%
+  left_join(st_drop_geometry(habmap_pol_1330_da), by = "polygon_id")
+
+samplesize_1330_da_gebieden <- type_1330_da_gebieden %>%
+  group_by(type, gebied, sac) %>%
+  summarise(area_gebied_ha = sum(phab/100 * area_ha)) %>%
+  ungroup() %>%
+  group_by(type, sac) %>%
+  mutate(area_ha = sum(area_gebied_ha)) %>%
+  ungroup() %>%
+  left_join(select(samplesize_mhq, type, sac, samplesize_type), by = c("type", "sac")) %>%
+  mutate(samplesize_gebied = round(samplesize_type * area_gebied_ha/ area_ha))
+  
+
+#write_sf(habmap_pol_1330_da, "../output/habitatkaart_1330_da.gpkg")
+
+```
+
+```{r}
+samplesize_1330_da_gebieden %>%
+  mutate(area_gebied_ha = round(area_gebied_ha, 2),
+         area_ha = round(area_ha, 2)) %>%
+  arrange(sac) %>%
+  mutate(sbzh = ifelse(sac, "binnen sbzh", "buiten sbzh")) %>%
+  select(habitat = type, sbzh, "oppervlakte tot" = area_ha, "steekproefgrootte totaal"  = samplesize_type, gebied, "oppervlakte gebied" = area_gebied_ha,  "steekproefgrootte gebied"  = samplesize_gebied) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(c(1, 2, 3, 4))
+```
+
+# Beschikbare pq's 
+
+## Kustgebieden
+
+
+
+```{r}
+pq_ziltehabitats_orig <- read_sf("../data/zilte_PQ_kust.shp", crs = 31370) 
+
+n_pq <- nrow(pq_ziltehabitats_orig)
+
+pq_ziltehabitats_type <-  pq_ziltehabitats_orig %>%
+  st_join(select(habmap$habitatmap_terr_polygons, polygon_id), largest = TRUE) %>%
+  left_join(habmap$habitatmap_terr_types, by = "polygon_id") %>%
+  select(pq_code = PQ_Code, trans_code = TRANS_Code, type, phab, polygon_id) %>%
+  filter(type %in% samplesize_mhq$type) %>%
+  st_join(gebieden_1330_da)
+
+n_pq_zilt <- nrow(pq_ziltehabitats_type)
+
+pq_ziltehabitats_1330_da <- pq_ziltehabitats_orig %>%
+  st_join(select(habmap_pol_1330_da, polygon_id), largest = TRUE) %>%
+  left_join(habmap_type_1330_da, by = "polygon_id") %>%
+  filter(!is.na(polygon_id)) %>%
+  select(pq_code = PQ_Code, trans_code = TRANS_Code, type, phab) %>%
+  st_join(gebieden_1330_da)
+
+n_pq_1330_da <- nrow(pq_ziltehabitats_1330_da)
+```
+
+De shapefile 'Zilte_PQ_kust.shp' bevat de bestaande pq's in de kustgebieden.
+De shapefile bevat `r n_pq` pq's, waarvan er:
+
++ `r n_pq_zilt` pq's liggen in polygonen van de habitatkaart die (gedeeltelijk) zilte habitats (13xx) bevatten;
+
++ `r n_pq_1330_da` pq's liggen in polygonen van de habitatkaart die (gedeeltelijk) habitatsubtype 1330_da bevatten.
+
+
+Onderstaande tabel geeft het verwacht aantal pq's per habitat(sub)type en per gebied. Hierbij houden we rekening met het aandeel habitat (de phab-waarde) binnen een polygoon van de habitatkaart. Een pq binnen een polygoon met 20% 1330_da, heeft 20% kans om in 1330_da te liggen.  
+
+
+
+```{r}
+overzicht_pq <- pq_ziltehabitats_type %>%
+  st_drop_geometry() %>%
+  filter(!is.na(gebied)) %>%
+  group_by(gebied, type) %>%
+  summarise(aantal_pq = round(sum(phab/100), 0)) %>%
+  ungroup()
+
+overzicht_pq %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+## Beschikbare pq's Schelde
+
+```{r}
+mhq_refpoints <- read_vc("data/mhq_terr_refpoints_check_update", fileman_up("n2khab-sample-admin"))
+
+mhq_refpoints_moneos <- mhq_refpoints %>%
+  filter(type_target == "1330_da")
+
+mhq_refpoints_moneos_sf <-  mhq_refpoints_moneos %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(crs = 4326)
+
+overzicht_moneos <- mhq_refpoints_moneos %>%
+  group_by(type_target) %>%
+  summarise(aantal_pq = n()) %>%
+  ungroup() %>%
+  mutate(gebied = "Schelde")
+
+overzicht_moneos %>%
+  select(gebied, type = type_target, aantal_pq) %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+
+## Overzichtskaart pq's 1330_da
+
++ De blauwe polygonen zijn polygonen van de habitatkaart die 1330_da bevatten
++ De punten zijn de bestaande pq's in de kustgebieden en aan de schelde (gele punten liggen in polygonen met 1330_da habitat)
+
+```{r}
+
+pq_ziltehabitats <- pq_ziltehabitats_orig %>%
+  st_centroid() %>%
+  mutate(show_color = ifelse(PQ_Code %in% pq_ziltehabitats_1330_da$pq_code, "yellow", "red")) %>%
+  st_transform(crs = 4326)
+
+leaflet(height = 600, width = 900) %>%
+  addTiles() %>%
+  addPolygons(data = st_transform(habmap_pol_1330_da, 4326), label = ~description_orig) %>%
+  addCircleMarkers(data = pq_ziltehabitats, color = ~show_color, radius = 1) %>%
+  addCircleMarkers(data = mhq_refpoints_moneos_sf, color = "yellow", radius = 1)
+```
+
