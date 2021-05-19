@@ -3,5 +3,8 @@
 .RData
 .Ruserdata
 data
-.html
-.md
+*.html
+*.md
+*.tif
+design-strategy/src/_bookdown_files/
+design-strategy/output/
