@@ -1,0 +1,79 @@
+
+
+---
+title: "Monitoring zilte habitats"
+# subtitle: "x"
+date: "`r lubridate::now()`"
+link-citations: true
+linkcolor: link.colour
+citecolor: link.colour
+urlcolor: link.colour
+geometry: margin=1in
+mainfont: "Calibri"
+fontsize: 11pt
+documentclass: "article"
+# csl: ../inbo.csl
+# bibliography: ../references.bib
+site: bookdown::bookdown_site
+output:
+  bookdown::html_document2:
+    keep_md: TRUE
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+      smooth_scroll: FALSE
+  bookdown::pdf_document2:
+    fig_caption: yes
+    keep_tex: yes
+    toc: yes
+    toc_depth: 3
+    latex_engine: xelatex
+    number_sections: true
+    includes:
+        in_header: ../header.tex
+---
+
+```{r setup, include=FALSE}
+
+# remotes::install_github("inbo/n2khab",
+#                         build_vignettes = TRUE,
+#                         upgrade = TRUE)
+
+# devtools::install_github("jmt2080ad/polylineSplitter")
+
+options(stringsAsFactors = FALSE,
+        scipen = 999, 
+        digits = 15)
+
+
+library(knitr)
+library(n2khab)
+library(sf)
+library(git2rdata)
+library(kableExtra)
+library(units)
+library(leaflet)
+library(crosstalk)
+library(tidyverse)
+
+options(stringsAsFactors = FALSE)
+options(knitr.kable.NA = '')
+
+opts_chunk$set(
+  echo = TRUE,
+  dpi = 300,
+  warning = FALSE,
+  message = FALSE
+)
+
+```
+
+
+
+
+
+
