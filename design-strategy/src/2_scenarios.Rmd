@@ -14,7 +14,9 @@ types <- read_types() %>%
   select(type, typelevel, main_type)
 
 sac <- read_admin_areas(dsn = "sac") %>%
-  select(sac_code)
+  group_by(sac_code) %>%
+  summarise(n_pol = n()) %>%
+  ungroup()
 
 habmap_polygons <- habmap_polygons %>%
   st_join(sac) %>%
