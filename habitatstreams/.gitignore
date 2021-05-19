@@ -2,7 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
-.html
-.md
-.zip
+.Rprofile
+*.html
+*.md
+*.zip
+output/
+src/_bookdown_files/
 

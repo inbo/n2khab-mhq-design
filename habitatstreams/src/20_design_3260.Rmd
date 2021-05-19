@@ -18,8 +18,6 @@ We used version 1.4 of habitatstreams as the basis for the sample frame. This ve
 
 map_3260_original <- read_sf("../data/habitatstreams/v1_4", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
 
-map_3260_v1_6 <- read_habitatstreams()
-
 #st_write(map_3260_original,dsn =  "../data/habitatmap3260_v14.gpkg", layer =  "habitatmap3260_v14", driver = "GPKG")
 ```
 
@@ -32,7 +30,7 @@ map_3260_original_strata <- map_3260_original %>%
 
 
 ```{r, warning=FALSE}
-sample_frame_3260 <- map_3260_original %>%
+map_3260 <- map_3260_original %>%
   group_by(OBJECTID) %>%
   mutate(length_3260 = drop_units(st_length(geometry))) %>%
   ungroup() %>%
@@ -65,7 +63,7 @@ calc_finite_samplesize <- function(N, n_infinite){
 Next, we calculate the sample size for a finite population using the finite population correction. The population size is the number of 100 meter segments with 3260 habitat.
 
 ```{r}
-sac_3260 <- sample_frame_3260 %>%
+sac_3260 <- map_3260 %>%
   st_drop_geometry() %>%
   group_by(sac) %>%
   summarise(length_3260 = sum(length_3260)) %>%
@@ -95,7 +93,7 @@ sample_size <- data.frame(sac = c("intersecting or downstream", "outside"),
                       n_finite = c(n_finite_sac, n_finite_outside)) %>%
   as_tibble()
 
-sample_size_strata <- sample_frame_3260 %>%
+sample_size_strata <- map_3260 %>%
   st_drop_geometry() %>%
   group_by(sac, catchment_area) %>%
   summarise(length_3260 = sum(length_3260)) %>%
@@ -126,23 +124,23 @@ The sampling unit for 3260 is a 100 meter segment. Therefore we select points on
 ```{r}
 tot_length_3260 <- sum(sac_3260$length_3260)
 
-segments_3260 <- spsample(as_Spatial(sample_frame_3260),
+segmentpoints3260 <- spsample(as_Spatial(map_3260),
                           n = ceiling(tot_length_3260/100),
-                          type="regular",
-                          cellsize=100,
-                          offset=0)
+                          type = "regular",
+                          cellsize = 100,
+                          offset = 0)
 
-sample_frame_3260_buffer <- st_buffer(sample_frame_3260,
+map_3260_buffer <- st_buffer(map_3260,
                               dist = 1)
                               
-segments_3260$name <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$name
-segments_3260$wl_code <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$wl_code
-segments_3260$catchment_area <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$catchment_area
-segments_3260$sac <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$sac
-segments_3260$province <- over(segments_3260, as_Spatial(sample_frame_3260_buffer))$province
-segments_3260$segment_id <- 1:nrow(segments_3260@data)
+segmentpoints3260$name <- over(segmentpoints3260, as_Spatial(map_3260_buffer))$name
+segmentpoints3260$wl_code <- over(segmentpoints3260, as_Spatial(map_3260_buffer))$wl_code
+segmentpoints3260$catchment_area <- over(segmentpoints3260, as_Spatial(map_3260_buffer))$catchment_area
+segmentpoints3260$sac <- over(segmentpoints3260, as_Spatial(map_3260_buffer))$sac
+segmentpoints3260$province <- over(segmentpoints3260, as_Spatial(map_3260_buffer))$province
+segmentpoints3260$segment_id <- 1:nrow(segmentpoints3260@data)
 
-segments_3260_2 <- segments_3260 %>%
+segmentpoints3260_2 <- segmentpoints3260 %>%
   as("sf")
 
 ```
@@ -158,23 +156,23 @@ In a next step, we deselect all points with a distance of more than 32 meters to
 ```{r}
 grts_master <- read_GRTSmh()
 
-segments_3260 <- segments_3260_2 %>%
+segmentpoints3260 <- segmentpoints3260_2 %>%
   mutate(grts_ranking = grts_master[as(., "Spatial")])
 
-segments_3260_border <- segments_3260 %>%
+segmentpoints3260_border <- segmentpoints3260 %>%
   filter(is.na(grts_ranking))
 
-segments_3260_border_buffer <- segments_3260_border %>%
+segmentpoints3260_border_buffer <- segmentpoints3260_border %>%
   st_buffer(dist = 100)
 
 grts_border <- grts_master %>%
-  mask(segments_3260_border_buffer) %>%
+  mask(segmentpoints3260_border_buffer) %>%
   rasterToPoints(spatial = TRUE) %>%
   st_as_sf()
 
 #write_sf(grts_border, dsn = "../output/grts_border4", layer = "check_grts_border", driver = "ESRI Shapefile")
 
-segments_3260_border_grts <- segments_3260_border %>%
+segmentpoints3260_border_grts <- segmentpoints3260_border %>%
  st_join(grts_border, join = st_nearest_feature) %>%
   group_by(segment_id) %>%
   mutate(dist = min(drop_units(st_distance(geometry, grts_border)))) %>%
@@ -183,13 +181,13 @@ segments_3260_border_grts <- segments_3260_border %>%
   filter(dist < 32 | name == "MAAS") %>%
   dplyr::select(-GRTSmaster_habitats, -dist) 
 
-segments_3260_final <- segments_3260 %>%
+segmentpoints3260_final <- segmentpoints3260 %>%
   filter(!is.na(grts_ranking)) %>%
-  rbind(segments_3260_border_grts) %>%
+  rbind(segmentpoints3260_border_grts) %>%
   arrange(segment_id) %>%
   mutate(sample_order = rank(grts_ranking)) 
 
-st_crs(segments_3260_final) <- 31370
+st_crs(segmentpoints3260_final) <- 31370
 
 ```
 
@@ -197,16 +195,16 @@ We compare the result with the original file 'steekproefkader_3260_v2015-05-28' 
 
 ```{r}
 
-segments_original <- read_sf("../data/streams_original", "steekproefkader_3260_v2015-05-28", crs = 31370) %>%
+segmentpointsoriginal <- read_sf("../data/streams_original", "steekproefkader_3260_v2015-05-28", crs = 31370) %>%
   dplyr::select(Volgorde, RankingGRT, naam, ID)
 
-#write_sf(segments_3260_final, dsn = "../output/check", layer = "check2", driver = "ESRI Shapefile")
+#write_sf(segmentpoints3260_final, dsn = "../output/check", layer = "check2", driver = "ESRI Shapefile")
 
-check <- segments_3260_final %>%
-  st_join(segments_original)
+check <- segmentpoints3260_final %>%
+  st_join(segmentpointsoriginal)
 
-check2 <- segments_original %>%
-  st_join(segments_3260_final)
+check2 <- segmentpointsoriginal %>%
+  st_join(segmentpoints3260_final)
 
 # one point does not overlap spatially
 
@@ -230,11 +228,11 @@ The segment points for the 3260 type and the corresponding grts-ranking is expor
 
 ```{r}
 
-habitatmap_streams_segments <-  segments_3260_final %>%
+habitatmap_streams_segments <-  segmentpoints3260_final %>%
   st_drop_geometry() %>%
   mutate(type = factor("3260", levels = levels(map_3260_v1_6$type)),
-         x = (st_coordinates(segments_3260_final))[,1],
-         y = (st_coordinates(segments_3260_final))[,2]) %>%
+         x = (st_coordinates(segmentpoints3260_final))[,1],
+         y = (st_coordinates(segmentpoints3260_final))[,2]) %>%
   dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
   
 #write_vc(habitatmap_streams_segments, file = "samplingframe_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
@@ -248,11 +246,11 @@ The result is exported as a table named 'sample_habitatstreams_v1_4'.
 
 ```{r}
 
-sample_3260 <- segments_3260_final %>%
+sample_3260 <- segmentpoints3260_final %>%
   st_drop_geometry() %>%
   mutate(type = factor("3260", levels = levels(map_3260_v1_6$type)),
-         x = (st_coordinates(segments_3260_final))[,1],
-         y = (st_coordinates(segments_3260_final))[,2]) %>%
+         x = (st_coordinates(segmentpoints3260_final))[,1],
+         y = (st_coordinates(segmentpoints3260_final))[,2]) %>%
   left_join(dplyr::select(sample_size_strata, sac, catchment_area, n_finite_stratum), by = c("sac", "catchment_area")) %>%
   group_by(sac, catchment_area) %>%
   mutate(sample_order_stratum = rank(grts_ranking)) %>%
