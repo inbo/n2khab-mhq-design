@@ -1,0 +1,297 @@
+# Design mhq watersurfaces
+
+## Sample frame
+
+### Original version
+
+```{r}
+versie <- "20140324"
+
+watersurfaces_hab_polygons_2014_orig <- read_sf("../data/watersurfaces_2014/BWK_plassen_versie 20140324.shp")
+# BWK_plassen_shape_SBZH<-BWK_plassen_shape[!is.na(BWK_plassen_shape$SBZH),]
+# writePolyShape(BWK_plassen_shape_SBZH,"BWK20140324_plassen_SBZH")
+# plot(BWK_plassen_shape_SBZH)
+
+watersurfaces_hab_polygons_2014 <- watersurfaces_hab_polygons_2014_orig %>%
+  mutate(sac = (SBZH == 1) & (!is.na(SBZH))) %>%
+  select(pol_id = Pol_ID, sac)
+
+check <- nrow(watersurfaces_hab_polygons_2014) == n_distinct(watersurfaces_hab_polygons_2014$pol_id)
+
+watersurfaces_hab_types_2014_orig <- read.table("../data/watersurfaces_2014/BWK_hab_aq.txt", header=TRUE)
+
+watersurfaces_hab_types_2014 <- watersurfaces_hab_types_2014_orig %>%
+  select(pol_id = Pol_ID, shape_area = Shape_Area, code, phab) %>%
+  filter(str_detect(code, "gh", negate = TRUE)) %>%
+  mutate(code = ifelse(code == "3130", "3130_aom", code),
+         patch_area = shape_area * phab/100,
+         area_ha = patch_area/10000,
+         area_class = ifelse(area_ha <= 1, "Opp <= 1 ha",
+                             ifelse(area_ha <= 5, "1 ha < Opp <= 5 ha",
+                                    ifelse(area_ha < 50, "5 ha < Opp < 50 ha", ">= 50 ha"))),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", ">= 50 ha"))) %>%
+  left_join(st_drop_geometry(watersurfaces_hab_polygons_2014), by = "pol_id") %>%
+  rename(type = code) %>%
+  mutate(version = "habitatmap_2014")
+
+```
+
+```{r}
+watersurfaces_hab_2014_overview <- watersurfaces_hab_types_2014 %>%
+  group_by(type, sac, area_class) %>%
+  summarise(n_watersurfaces = n()) %>%
+  ungroup() %>%
+  group_by(type) %>%
+  mutate(total = sum(n_watersurfaces)) %>%
+  ungroup() %>%
+  group_by(type, sac) %>%
+  mutate(total_sac = sum(n_watersurfaces)) %>%
+  ungroup()
+
+```
+
+```{r}
+watersurfaces_hab_2014_overview %>%
+  spread(key = area_class, value = n_watersurfaces, fill = 0) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows()
+
+```
+
+
+### Version 2021
+
+```{r}
+watersurfaces_hab <- read_watersurfaces_hab()
+
+filepath <-  file.path(fileman_up("n2khab_data"), "20_processed/watersurfaces_hab/watersurfaces_hab.gpkg")
+
+check_version <- n2khab::xxh64sum(filepath) == "5792b496a94d0524"
+
+sac_sf <- read_admin_areas(dsn = "sac") %>%
+  group_by(sac_name) %>%
+  summarise(n_pol = n()) %>%
+  ungroup() %>%
+  select(sac_name)
+
+watersurfaces_area <- watersurfaces_hab$watersurfaces_polygons %>%
+  mutate(area_ha = drop_units(st_area(geom))/10000,
+         area_class = ifelse(area_ha <= 1, "Opp <= 1 ha",
+                             ifelse(area_ha <= 5, "1 ha < Opp <= 5 ha",
+                                    ifelse(area_ha < 50, "5 ha < Opp < 50 ha", ">= 50 ha"))),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", ">= 50 ha"))) %>%
+  st_join(sac_sf) %>%
+  mutate(sac = !is.na(sac_name)) %>%
+  st_drop_geometry()
+
+watersurfaces_types_2021 <- watersurfaces_hab$watersurfaces_types %>%
+  filter(type != "rbbah") %>%
+  left_join(watersurfaces_area, by = "polygon_id") %>%
+  mutate(type = ifelse(type == "3130", "3130_aom", as.character(type))) %>%
+  mutate(version = "watersurfaces_hab_2021")
+
+watersurfaces_types <- watersurfaces_types_2021 %>%
+  bind_rows(watersurfaces_hab_types_2014)
+
+```
+
+```{r}
+watersurfaces_hab_overview <- watersurfaces_types %>%
+  group_by(type, sac, area_class) %>%
+  summarise(n_watersurfaces = n()) %>%
+  ungroup() %>%
+  group_by(type) %>%
+  mutate(total = sum(n_watersurfaces)) %>%
+  ungroup() %>%
+  group_by(type, sac) %>%
+  mutate(total_sac = sum(n_watersurfaces)) %>%
+  ungroup()
+  
+```
+
+```{r}
+watersurfaces_hab_overview %>%
+  spread(key = area_class, value = n_watersurfaces, fill = 0) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(1)
+
+```
+
+```{r}
+watersurfaces_types %>%
+  ggplot(aes(x = area_class, fill = version)) +
+  geom_bar(position = "dodge") +
+  facet_wrap(~type, scales = "free_x") +
+  coord_flip() +
+  theme(legend.position = "bottom")
+```
+
+```{r, fig.height= 5}
+watersurfaces_types %>%
+  group_by(version, type, area_class) %>%
+  summarise(area_ha = sum(area_ha)) %>%
+  ungroup() %>%
+  ggplot(aes(x = area_class, y = area_ha , fill = version, shape = version)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  facet_wrap(~type, scales = "free_x") +
+  coord_flip() +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+
+habitatmap_2020 <- read_habitatmap_stdized()
+
+area_polygons_watersurfaces <- habitatmap_2020$habitatmap_polygons %>%
+  filter(str_detect(description_orig, "31")) %>%
+  mutate(area_ha = drop_units(st_area(geom)) / 10000) %>%
+  select(polygon_id, area_ha) %>%
+  st_drop_geometry()
+
+area_type_habitatmap_2020 <- habitatmap_2020$habitatmap_types %>%
+  filter(str_sub(type,1, 2) == "31") %>%
+  left_join(area_polygons_watersurfaces, by = "polygon_id") %>%
+  mutate(area_watersurface = area_ha * phab/100,
+         type = ifelse(type == "3130", "3130_aom", as.character(type))) %>%
+  group_by(type) %>%
+  summarise(area_ha = round(sum(area_watersurface))) %>%
+  ungroup() %>%
+  mutate(version = "habitatmap_2020")
+
+area_type_reporting2019 <- read_csv2("../data/type_area_reporting2019.csv") %>%
+  filter(str_sub(type, 1, 2) == "31") %>%
+  mutate(version = "rapportage_2019",
+         area = round(area)) %>%
+  select(type, area_ha = area, version) 
+
+watersurfaces_types %>%
+  group_by(type, version) %>%
+  summarise(area_ha = round(sum(area_ha))) %>%
+  ungroup() %>%
+  bind_rows(area_type_habitatmap_2020) %>%
+  bind_rows(area_type_reporting2019) %>%
+  arrange(type, version) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+
+## Sample size
+
+### Original version
+
++ sample for 3130_aom, 3150, 3160 in area classes `Opp <= 1 ha` and  `1 ha < Opp <= 5 ha`
+  + sample size = 40 for Flanders
+  + extra sampling units within sac until 80 sampling units are selected
+  + finite population correction
+  + sample size equally divided over both area classes
++ selection of all watersurfaces for other area classes and other habitat types
+
+#### Westra et al. (2014)
+
+```{r}
+samplesize_original <- read_table2("../data/watersurfaces_2014/Steekproefgrootte_plassen_versie20140326.txt") %>%
+  rename(sac = "SBZ-H") %>%
+  mutate(sac = sac == 1) %>%
+  select(type = habt, sac, area_class_min = min_opp, area_class_max = max_opp, samplesize = n) 
+
+```
+```{r}
+samplesize_original %>%
+  filter(type %in% c("3130_aom", "3150", "3160")) %>%
+  mutate(area_class = ifelse(area_class_max == 1, "Opp <= 1 ha",
+                             ifelse(area_class_max == 5, "1 ha < Opp <= 5 ha",
+                                    "5 ha < Opp <= 50 ha")),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp <= 50 ha"))) %>%
+  select(-area_class_max, -area_class_min) %>%
+  spread(key = area_class, value = samplesize, fill = 0) %>%
+  kable() %>%
+  kable_styling()
+```
+
+Hmmm... still different than in the Westra et al. report...
+
+
+#### Reproduce samplesize from sample frame
+
+```{r}
+n_fland <- 40
+n_sac <- 80
+
+samplesize_2014 <- watersurfaces_hab_2014_overview %>%
+  group_by(type, area_class) %>%
+  mutate(total_area_class = sum(n_watersurfaces)) %>%
+  ungroup() %>%
+  mutate(take_sample = total >= 50 & area_class %in% c("Opp <= 1 ha", "1 ha < Opp <= 5 ha")) %>%
+  group_by(type, take_sample) %>%
+  mutate(n_watersurfaces_sample = sum(n_watersurfaces * take_sample)) %>%
+  ungroup() %>% 
+  group_by(type, take_sample, sac) %>%
+  mutate(n_watersurfaces_sample_sac = sum(n_watersurfaces * take_sample)) %>%
+  ungroup() %>%
+  mutate(n_finite_fland = n_watersurfaces_sample * n_fland / (n_fland + (n_watersurfaces_sample - 1)),
+         n_finite_sac = n_watersurfaces_sample_sac * n_sac / (n_sac + (n_watersurfaces_sample_sac - 1)),
+         prop_sac = n_watersurfaces_sample_sac/n_watersurfaces_sample, 
+         samplesize = ifelse(!take_sample, n_watersurfaces,
+                             ifelse(n_watersurfaces <= 5, n_watersurfaces,
+                                    ifelse(sac, n_finite_sac/2, n_finite_fland * prop_sac/2))),
+         samplesize = pmin(samplesize, n_watersurfaces))
+
+```
+
+```{r}
+samplesize_2014_overview <- samplesize_2014 %>%
+  filter(take_sample) %>%
+  select(type, sac, area_class, samplesize) %>%
+  mutate(samplesize = round(samplesize)) %>%
+  spread(key = area_class, value = samplesize)
+
+samplesize_2014_overview %>%
+  kable() %>%
+  kable_styling()
+  
+```
+
+### 2021
+
+```{r}
+n_fland <- 40
+n_sac <- 80
+
+samplesize_2021 <- watersurfaces_hab_overview %>%
+  group_by(type, area_class) %>%
+  mutate(total_area_class = sum(n_watersurfaces)) %>%
+  ungroup() %>%
+  mutate(take_sample = total >= 50 & area_class %in% c("Opp <= 1 ha", "1 ha < Opp <= 5 ha")) %>%
+  group_by(type, take_sample) %>%
+  mutate(n_watersurfaces_sample = sum(n_watersurfaces * take_sample)) %>%
+  ungroup() %>% 
+  group_by(type, take_sample, sac) %>%
+  mutate(n_watersurfaces_sample_sac = sum(n_watersurfaces * take_sample)) %>%
+  ungroup() %>%
+  mutate(n_finite_fland = n_watersurfaces_sample * n_fland / (n_fland + (n_watersurfaces_sample - 1)),
+         n_finite_sac = n_watersurfaces_sample_sac * n_sac / (n_sac + (n_watersurfaces_sample_sac - 1)),
+         prop_sac = n_watersurfaces_sample_sac/n_watersurfaces_sample, 
+         samplesize = ifelse(!take_sample, n_watersurfaces,
+                             ifelse(n_watersurfaces <= 5, n_watersurfaces,
+                                    ifelse(sac, n_finite_sac/2, n_finite_fland * prop_sac/2))),
+         samplesize = pmin(samplesize, n_watersurfaces))
+
+```
+
+```{r}
+samplesize_2021_overview <- samplesize_2021 %>%
+  filter(take_sample) %>%
+  select(type, sac, area_class, samplesize) %>%
+  mutate(samplesize = round(samplesize)) %>%
+  spread(key = area_class, value = samplesize, fill = 0)
+
+samplesize_2021_overview %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(1)
+  
+```

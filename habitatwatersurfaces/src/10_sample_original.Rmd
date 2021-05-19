@@ -1,0 +1,379 @@
+
+# Read original mhq sample for watersurfaces
+
+## Selected sampling units in 2014
+
+```{r}
+# shapefile with polygons
+sample_2014_orig <- read_sf("../data/watersurfaces_2014/steekproef2014.shp", crs = 31370)
+
+sample_2014_sf <- sample_2014_orig %>%
+  select(pol_id = Pol_ID, sac = SBZH, type_target = doelhabt) %>%
+  mutate(sac = ifelse(is.na(sac), 0, sac)) %>%
+  group_by(pol_id, sac) %>%
+  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  ungroup() %>%
+  mutate(pol_id = as.character(pol_id))
+
+# text file with sampling units
+sample_3130_aom <- read.table("../data/watersurfaces_2014/meetnet3130_aom_20140324.txt", ) 
+sample_3130_na <- read.table("../data/watersurfaces_2014/meetnet3130_na_20140324.txt") 
+sample_3140 <- read.table("../data/watersurfaces_2014/meetnet3140_20140324.txt") %>%
+  mutate(code = as.character(code))
+sample_3150 <- read.table("../data/watersurfaces_2014/meetnet3150_20140324.txt")  %>%
+  mutate(code = as.character(code))
+sample_3160 <- read.table("../data/watersurfaces_2014/meetnet3160_20140324.txt")%>%
+  mutate(code = as.character(code))
+
+sample_2014 <- bind_rows(sample_3130_aom,
+                         sample_3130_na,
+                         sample_3140,
+                         sample_3150,
+                         sample_3160) %>%
+  filter(steekproef == 1) %>%
+  select(pol_id = Pol_ID, sac = SBZH, type_target = code, phab, area_class = Opp_klasse, grts_ranking = Ranking, ranking_rel = rangnr) %>%
+  mutate(set = "selection2014",
+    area_class = ifelse(area_class == "(0,1e+04]", "Opp <= 1 ha",
+                             ifelse(area_class == "(1e+04,5e+04]", "1 ha < Opp <= 5 ha",
+                                    ifelse(area_class == "(5e+04,1e+05]", "5 ha < Opp < 50 ha",
+                                           ifelse(area_class == "(1e+05,2.5e+05]", "5 ha < Opp < 50 ha",
+                                                  ifelse(area_class == "(2.5e+05,5e+05]", "5 ha < Opp < 50 ha", NA))))),
+    area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha"))) %>%
+  mutate(pol_id = as.character(pol_id))
+
+sample_2014_ranking <- sample_2014 %>%
+  distinct(pol_id, grts_ranking)
+
+sample_2014_sf <- sample_2014_sf %>%
+  left_join(sample_2014_ranking, by = "pol_id") %>%
+  mutate(set = "selection2014")
+
+check_pol_id <- all.equal((sample_2014_sf %>%
+                      arrange(pol_id))$pol_id,
+                    (sample_2014 %>%
+                      arrange(pol_id))$pol_id %>%
+                      unique())
+```
+
+### Reproduce grts_ranking
+
+```{r}
+grts_master <- read_GRTSmh()
+
+sample_2014_ranking_centroid <- sample_2014_sf %>%
+  st_centroid() %>%
+  mutate(grts_ranking_centroid = grts_master[as(., "Spatial")])
+
+check_ranking <- sample_2014_ranking_centroid %>%
+  filter(grts_ranking != grts_ranking_centroid)
+
+```
+
+```{r}
+# read original refpoint data
+
+refpoint_3130_aom <- read_sf("../data/watersurfaces_2014/meetnet_3130_aom_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3130_na <- read_sf("../data/watersurfaces_2014/meetnet_3130_na_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3140 <- read_sf("../data/watersurfaces_2014/meetnet_3140_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3150 <- read_sf("../data/watersurfaces_2014/meetnet_3150_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY)
+
+refpoint_3160 <- read_sf("../data/watersurfaces_2014/meetnet_3160_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY)
+
+sample_2014_refpoint <- bind_rows(refpoint_3130_aom, refpoint_3130_na, refpoint_3140, refpoint_3150, refpoint_3160) %>%
+  unique() %>%
+  mutate(x_refpoint = x_centroid,
+         y_refpoint = y_centroid) %>%
+  st_as_sf(coords = c("x_centroid", "y_centroid"), crs = 31370) %>%
+  mutate(grts_ranking = grts_master[as(., "Spatial")],
+         pol_id = as.character(pol_id))
+
+```
+
+```{r}
+ranking_refpoint <- sample_2014_refpoint %>%
+  st_drop_geometry() %>%
+  rename(grts_ranking_refpoint = grts_ranking)
+
+sample_2014_ranking_centroid_check <- sample_2014_ranking_centroid %>%
+  left_join(ranking_refpoint, by = "pol_id") %>%
+  filter(grts_ranking != grts_ranking_centroid)
+  
+```
+
++ manual error for polygon with pol_id 5083 and 16115
+
++ different centroid for polygons with pol_id 19114, 19877, and 51206: three polygons with 'islands'
+
+
+
+```{r}
+pol_different_centroid <- c("19114", "19877", "51206")
+
+show_polygons <- sample_2014_sf %>%
+  filter(pol_id %in% pol_different_centroid) %>%
+  st_transform(4326)
+
+show_centroids <- sample_2014_ranking_centroid %>%
+  filter(pol_id %in% pol_different_centroid) %>%
+  st_transform(4326)
+
+show_refpoints <- sample_2014_refpoint %>%
+  filter(pol_id %in% pol_different_centroid) %>%
+  st_transform(4326)
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = show_polygons) %>%
+  addCircleMarkers(data = show_centroids, color = "red") %>%
+  addCircleMarkers(data = show_refpoints, color = "yellow") 
+
+```
+
+
+
+
+```{r}
+overzicht_sample_2014 <- sample_2014 %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(samplesize = n_distinct(pol_id)) %>%
+  ungroup()
+```
+```{r}
+overzicht_sample_2014 %>%
+  spread(area_class, samplesize, fill = 0) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+## Available extra sampling units in 2016
+
+```{r}
+sampleframe_31xx_2016_sf_orig <- read_sf("../data/watersurfaces_2016/Steekproef_31xx_extra_versie20160531.shp", crs = 31370)
+
+sampleframe_31xx_2016_orig <- read_csv2("../data/watersurfaces_2016/Steekproef_31xx.csv")
+
+sampleframe_2190_sf_orig <- read_sf("../data/watersurfaces_2016/Steekproefkader_2190_versie20170606.shp", crs = 31370) 
+
+sampleframe_31xx_2016 <- sampleframe_31xx_2016_orig %>%
+  select(pol_id = ID_Plas, type_target = Habsubt, sac = SBZH, area_class = OppKlasse, grts_ranking = Ranking, ranking_rel = RangNr, source_polygon = Type) %>%
+  mutate(set = "selection2016")
+
+polygon_id_type_target_all <- sampleframe_31xx_2016 %>%
+  group_by(pol_id) %>%
+  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  ungroup()
+
+sampleframe_31xx_2016_sf <- sampleframe_31xx_2016_sf_orig %>%
+  select(pol_id = ID_Plas,  grts_ranking = Ranking, sac = SBZH) %>%
+  mutate(sac = as.numeric(sac)) %>%
+  left_join(polygon_id_type_target_all, by = "pol_id") %>%
+  mutate(set = "selection2016")
+
+sampleframe_2190 <- sampleframe_2190_sf_orig %>%
+  st_drop_geometry() %>%
+  mutate(type_target = "2190") %>%
+  select(pol_id = ID_plas, type_target, sac = SBZH, area_class = OppKlasse, grts_ranking = Ranking, ranking_rel = Volgorde) %>%
+  mutate(set = "selection2016") %>%
+  mutate(pol_id = as.character(pol_id),
+         area_class = ifelse(area_class != "1 ha < Opp <= 5 ha", "Opp <= 1 ha", area_class))
+
+sampleframe_2190_sf <- sampleframe_2190_sf_orig %>%
+  mutate(type_target_all = "2190") %>%
+  select(pol_id = ID_plas, grts_ranking = Ranking, sac = SBZH, type_target_all, selected = Steekproef) %>%
+  mutate(pol_id = as.character(pol_id),
+         set = "selection2016")
+  
+```
+
+
+
+### Reproduce grts-ranking
+
+```{r}
+sampleframe_2016_ranking_refpoint <- sampleframe_31xx_2016_sf %>%
+  bind_rows(sampleframe_2190_sf) %>%
+  st_point_on_surface() %>%
+  mutate(grts_ranking_refpoint = grts_master[as(., "Spatial")])
+
+check_ranking <- sampleframe_2016_ranking_refpoint %>%
+  filter(grts_ranking != grts_ranking_refpoint)
+
+check_ranking_2190 <- check_ranking %>%
+  mutate(rank_correct = rank(grts_ranking_refpoint),
+         selection_correct = rank_correct <= 60)
+
+sum(check_ranking_2190$selected == 1 & check_ranking_2190$selection_correct)
+```
+
++ different ranking for 5 polygons for 31xx
+
++ wrong grts_ranking for 2190 (factor level instead of actual ranking)
+
+```{r}
+check_ranking %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+
+```{r}
+sampleframe_31xx_2016_sf %>%
+  bind_rows(sampleframe_2190_sf) %>%
+  filter(pol_id %in% check_ranking$pol_id) %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons() %>%
+  addMarkers(data = st_transform(check_ranking, 4326), label = ~pol_id)
+         
+```
+
+```{r}
+pol_example_id <- 47909
+
+pol_example <- sampleframe_2190_sf %>%
+  filter(pol_id == pol_example_id) 
+
+check_ranking_example <- check_ranking %>%
+  filter(pol_id == pol_example_id)
+
+library(stars)
+grts_master_example <- grts_master %>%
+  crop(st_buffer(pol_example, 50)) %>%
+  st_as_stars() %>%
+  st_as_sf(as_points = TRUE) %>%
+  st_transform(4326) %>%
+  mutate(check_ranking = ifelse(GRTSmaster_habitats == check_ranking_example$grts_ranking, "yellow",
+                                ifelse(GRTSmaster_habitats == check_ranking_example$grts_ranking_refpoint, "blue", "red")))
+
+
+grts_ranking_original <- read_sf("../data/watersurfaces_2016/GRTS_master_2190_v2.shp",
+                                 crs = 31370)
+
+grts_ranking_original_example <- grts_ranking_original %>%
+  mutate(grts_ranking = as.character(Ranking)) %>%
+  # filter(grts_ranking == check_ranking_example$grts_ranking) %>%
+  st_transform(4326)
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = st_transform(pol_example, 4326)) %>%
+  addCircleMarkers(data = grts_master_example, label = ~GRTSmaster_habitats, color = ~check_ranking) %>%
+  addMarkers(data = grts_ranking_original_example)
+
+```
+
+
+```{r}
+sampleframe_2190_sf_orig %>%
+  st_transform(4326) %>%
+  mutate(color_show = ifelse(Steekproef == 1, "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(color = ~color_show)
+```
+
+```{r}
+overzicht_sample_2016 <- sampleframe_31xx_2016 %>%
+  mutate(area_class = ifelse(area_class == "> 50 ha", "Opp >= 50 ha", area_class),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha"))) %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(samplesize = n_distinct(pol_id)) %>%
+  ungroup()
+
+overzicht_sample_2016 %>%
+  spread(area_class, samplesize, fill = 0) %>%
+  kable() %>%
+  kable_styling()
+```
+
+## Combine data
+
+```{r}
+mhq_watersurfaces_polygons <- sample_2014_sf %>%
+  bind_rows(sampleframe_31xx_2016_sf) %>%
+  bind_rows(sampleframe_2190_sf) %>%
+  mutate(sac = as.logical(sac)) %>%
+  select(pol_id, grts_ranking, sac, type_target_all, set)
+
+check_unique_pol_id <- nrow(mhq_watersurfaces_polygons) == n_distinct(mhq_watersurfaces_polygons$pol_id)
+check_unique_ranking <- nrow(mhq_watersurfaces_polygons) == n_distinct(mhq_watersurfaces_polygons$grts_ranking)
+
+watersurfaces_polygons_ranking_not_unique <- mhq_watersurfaces_polygons %>%
+  group_by(grts_ranking) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+mhq_watersurfaces_types <- sample_2014 %>%
+  bind_rows(sampleframe_31xx_2016) %>%
+  bind_rows(sampleframe_2190) %>%
+  mutate(sac = as.logical(sac),
+         area_class = ifelse(area_class == "> 50 ha", "Opp >= 50 ha", area_class),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha")))
+
+
+unique(mhq_watersurfaces_types$area_class)
+```
+
+```{r}
+overview_combine <- mhq_watersurfaces_types %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  spread(key = area_class, value = n, fill = 0)
+
+overview_combine %>%
+  kable() %>%
+  kable_styling()
+  
+```
+
+
+## Check for polygons without unique grts_ranking
+
+```{r}
+watersurfaces_polygons_ranking_not_unique %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(set == "selection2014", "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(label = ~grts_ranking, color = ~show_color)
+```
+
+
+
+## Visualise data
+
+The map below shows: 
+
++ original sampling units selected in 2014 (yellow polygons)
+
++ potential extra sampling units selected in 2016
+
+```{r}
+
+mhq_watersurfaces_polygons %>%
+  st_transform(crs = 4326) %>%
+  mutate(show_color = ifelse(set == "selection2014", "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(label = ~type_target_all, color = ~show_color) 
+```
+```
+
