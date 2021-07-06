@@ -1,0 +1,191 @@
+## Progress
+
+### All measurements
+
+```{r}
+overview_all <- assessments_mhq_watersurfaces %>%
+  filter(measurement_biotic |  measurement_abiotic) %>%
+  group_by(type_observed) %>%
+  mutate(set = str_c(unique(set), collapse = ";")) %>%
+  ungroup() %>%
+  group_by(type_observed, sac, area_class_observed, set) %>%
+  summarise(n_biotic = sum(measurement_biotic),
+            n_abiotic = sum(measurement_abiotic)) %>%
+  ungroup() %>%
+  group_by(type_observed) %>%
+  mutate(n_biotic_total = sum(n_biotic),
+         n_abiotic_total = sum(n_abiotic)) %>%
+  ungroup() 
+```
+
+```{r}
+
+overview_all %>%
+  mutate(n = str_c(n_biotic, n_abiotic, sep = "/"),
+         n_total = str_c(n_biotic_total, n_abiotic_total, sep = "/")) %>%
+  select(-n_biotic, -n_abiotic, -n_biotic_total, -n_abiotic_total) %>%
+  spread(key = area_class_observed, value = n, fill = "0/0") %>%
+  select(type_observed, n_total, set, everything()) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(columns = c(1, 2))
+
+overview_biotic <- overview_all %>%
+  select(-n_abiotic,-n_abiotic_total) %>%
+  spread(key = area_class_observed, value = n_biotic, fill = "0")
+  
+overview_biotic %>%
+  filter(!type_observed  %in% c("gh", "unknown", "3140?")) %>%
+  select(-set) %>%
+  select(type_observed, n_biotic_total, everything()) %>%
+  kbl(align = "lccccc") %>%
+  kable_styling(font_size = 20) %>%
+  column_spec(1, bold = TRUE) %>%
+  collapse_rows(c(1,2)) %>%
+  save_kable(file = "../output/table_progress_all.png")
+```
+
+
+
+### Check sampled strata 
+
+```{r}
+
+
+measurements_mhq_watersurfaces_sample <- assessments_mhq_watersurfaces %>%
+  filter(type_observed %in% c("3130_aom", "3150", "3160", "2190"),
+         area_class_observed %in% c("Opp <= 1 ha", "1 ha < Opp <= 5 ha"))
+
+max_ranking <- mhq_watersurfaces_types %>%
+  filter(set == "selection2014") %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(max_ranking_2014 = max(grts_ranking)) %>%
+  ungroup() %>%
+  rename(type_observed = type_target)
+
+measurements_mhq_watersurfaces_sample <- measurements_mhq_watersurfaces_sample %>%
+  left_join(max_ranking, by = c("type_observed", "sac", "area_class")) %>%
+  mutate(allow_other_type = ifelse(set == "selection2014" & !is_type_target,
+                                   max_ranking_2014 >= grts_ranking,
+                                   NA)) 
+  
+```
+
+
+```{r}
+samplesize_2019 <- sampleframe_2190_sf %>%
+  st_drop_geometry() %>%
+  filter(selected == 1) %>%
+  left_join(select(sampleframe_2190, pol_id, area_class), by = "pol_id") %>%
+  group_by(type_target_all, sac, area_class) %>%
+  summarise(samplesize = n_distinct(pol_id)) %>%
+  ungroup() %>%
+  rename(area_class_observed = area_class, type_observed = type_target_all) %>%
+  mutate(area_class_observed = factor(area_class_observed, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha")))
+
+
+samplesize_2014_overzicht <- samplesize_2014 %>%
+  select(type_observed = type, sac, area_class_observed = area_class, samplesize) %>%
+  mutate(samplesize = round(samplesize)) %>%
+  bind_rows(samplesize_2019)
+
+overview_sample <- measurements_mhq_watersurfaces_sample %>%
+  filter(measurement_biotic |  measurement_abiotic) %>%
+  mutate(is_valid_type = is_type_target | allow_other_type) %>%
+  group_by(type_observed, is_valid_type) %>%
+  mutate(set = str_c(unique(set), collapse = ";")) %>%
+  ungroup() %>%
+  group_by(type_observed, sac, area_class_observed, is_valid_type) %>%
+  summarise(n_biotic = sum(measurement_biotic)) %>%
+  ungroup() %>%
+  group_by(type_observed, is_valid_type) %>%
+  mutate(n_biotic_total = sum(n_biotic)) %>%
+  ungroup() %>%
+  left_join(samplesize_2014_overzicht, by = c("type_observed", "sac", "area_class_observed")) %>%
+  mutate(n_progress = str_c(n_biotic, samplesize, sep = "/"))
+```
+
+```{r}
+overview_sample %>%
+  filter(is_valid_type) %>%
+  select(type_observed, n_biotic_total, sac, area_class_observed, n_progress) %>%
+  arrange(type_observed, sac, desc(area_class_observed)) %>%
+  spread(key = area_class_observed, value = n_progress) %>%
+  kbl(align = "lccccc") %>%
+  kable_styling(font_size = 20) %>%
+  column_spec(1, bold = TRUE) %>%
+  collapse_rows(c(1,2)) %>%
+  save_kable(file = "../output/table_progress_sample.png")
+
+overview_sample %>%
+  filter(is.na(is_valid_type)) %>%
+  select(type_observed, n_biotic_total, sac, area_class_observed, n_biotic) %>%
+  arrange(type_observed, sac, area_class_observed) %>%
+  spread(key = area_class_observed, value = n_biotic, fill = 0) %>%
+  kbl(align = "lccccc") %>%
+  kable_styling(font_size = 20) %>%
+  column_spec(1, bold = TRUE) %>%
+  collapse_rows(c(1,2)) %>%
+  save_kable(file = "../output/table_progress_extra.png")
+
+```
+
+```{r}
+
+progress_sample <- assessments_mhq_watersurfaces %>%
+  mutate(assessment = ifelse(is.na(assessment), FALSE, assessment)) %>%
+  distinct(pol_id, grts_ranking, set, type_target_all, sac, area_class, assessment) %>%
+  separate_rows(type_target_all, sep = ";") %>%
+  rename(type_target = type_target_all) %>%
+  filter(type_target %in% c("3130_aom", "3150", "3160", "2190"),
+         area_class %in% c("Opp <= 1 ha", "1 ha < Opp <= 5 ha")) %>%
+  group_by(type_target, sac, area_class, set) %>%
+  mutate(n_assessed = sum(assessment),
+         ranking_rel = rank(grts_ranking),
+         n_wrong = sum((ranking_rel <= n_assessed) & !(assessment))
+         ) %>%
+  ungroup() %>%
+  distinct(set, type_target, sac, area_class, n_assessed, n_wrong) %>%
+  arrange(set, type_target, sac, area_class)
+```
+
+```{r}
+
+progress_integral <- assessments_mhq_watersurfaces %>%
+  mutate(assessment = ifelse(is.na(assessment), FALSE, assessment),
+         type_target_all = ifelse(is.na(type_target_all), type_observed, type_target_all),
+         area_class = ifelse(is.na(area_class), as.character(area_class_observed), as.character(area_class)),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha"))) %>%
+  distinct(pol_id, grts_ranking, set, type_target_all, sac, area_class, assessment) %>%
+  separate_rows(type_target_all, sep = ";") %>%
+  rename(type_target = type_target_all) %>%
+  filter(!(type_target %in% c("3130_aom", "3150", "3160", "2190") &
+         area_class %in% c("Opp <= 1 ha", "1 ha < Opp <= 5 ha"))) %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(n_assessed = sum(assessment),
+            n_watersurfaces = n(),
+            set = str_c(unique(set), collapse = ";")) %>%
+  ungroup() %>%
+  group_by(type_target) %>%
+  mutate(n_assessed_total = sum(n_assessed),
+         n_watersurfaces_total = sum(n_watersurfaces)) %>%
+  ungroup() %>%
+  mutate(n_progress = str_c(n_assessed, n_watersurfaces, sep = "/"),
+         n_progress_total = str_c(n_assessed_total, n_watersurfaces_total, sep = "/"))
+  
+```
+
+```{r}
+progress_integral %>%
+  filter(str_sub(type_target, 1, 2) == "31") %>%
+  select(-n_assessed, -n_watersurfaces, -n_assessed_total, -n_watersurfaces_total, -set) %>%
+  select(type_target, n_progress_total, everything()) %>%
+  spread(key = area_class, value = n_progress, fill = "") %>%
+  kbl(align = "lccccc") %>%
+  kable_styling(font_size = 20) %>%
+  column_spec(1, bold = TRUE) %>%
+  collapse_rows(c(1, 2)) %>%
+  save_kable(file = "../output/table_progress_integral.png")
+  
+```
+

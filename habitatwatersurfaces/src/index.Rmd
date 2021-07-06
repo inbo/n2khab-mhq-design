@@ -65,6 +65,7 @@ library(units)
 library(renv)
 library(readxl)
 library(INBOtheme)
+library(inbodb)
 
 options(stringsAsFactors = FALSE)
 
