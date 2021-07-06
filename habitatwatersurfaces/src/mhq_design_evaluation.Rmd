@@ -1,3 +1,511 @@
+
+
+---
+title: "Design and evaluation of monitoring habitat quality scheme for watersurfaces"
+# subtitle: "x"
+date: "`r lubridate::now()`"
+link-citations: true
+linkcolor: link.colour
+citecolor: link.colour
+urlcolor: link.colour
+geometry: margin=1in
+mainfont: "Calibri"
+fontsize: 11pt
+documentclass: "article"
+# csl: ../inbo.csl
+# bibliography: ../references.bib
+site: bookdown::bookdown_site
+output:
+  bookdown::html_document2:
+    keep_md: TRUE
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+      smooth_scroll: FALSE
+  bookdown::pdf_document2:
+    fig_caption: yes
+    keep_tex: yes
+    toc: yes
+    toc_depth: 3
+    latex_engine: xelatex
+    number_sections: true
+    includes:
+        in_header: ../header.tex
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(
+  echo = TRUE,
+  cache = TRUE ,
+  warning = FALSE,
+  message = FALSE
+)
+
+# remotes::install_github("inbo/n2khab",
+#                         ref = "dev_0.5.0")
+options(rgdal_show_exportToProj4_warnings = "none")
+options(stringsAsFactors = FALSE,
+        scipen = 999, 
+        digits = 15)
+library(sf)
+library(git2rdata)
+library(stars)
+library(raster)
+library(tidyverse)
+library(n2khab)
+library(kableExtra)
+library(units)
+library(leaflet)
+library(units)
+library(renv)
+library(readxl)
+library(INBOtheme)
+library(inbodb)
+
+options(stringsAsFactors = FALSE)
+
+```
+
+
+
+
+
+
+
+<!--chapter:end:index.Rmd-->
+
+
+# Read original mhq sample for watersurfaces
+
+## Selected sampling units in 2014
+
+In 2014 the an initial sample was drawn based in the habitatmap version 2014.
+The sampling unit corresponds to a polygon of the habitatmap.
+A GRTS ranking was asigned to every polygon based on [GRTSmaster_habitats](https://zenodo.org/record/2682323).
+The centroid of the polygon was used to link the polygon to a GRTS raster cell.
+So we can regard the centroid of the polygon as the 'reference point' of the sampling unit
+
+The files can be found in [this google drive folder](https://drive.google.com/drive/folders/1j-CbsuF6vTQJ3weT6gJWTV1nVhxWmfX7).
+
+```{r}
+# shapefile with polygons
+sample_2014_orig <- read_sf("../data/watersurfaces_2014/steekproef2014.shp", crs = 31370)
+
+sample_2014_sf <- sample_2014_orig %>%
+  select(pol_id = Pol_ID, sac = SBZH, type_target = doelhabt) %>%
+  mutate(sac = ifelse(is.na(sac), 0, sac)) %>%
+  group_by(pol_id, sac) %>%
+  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  ungroup() %>%
+  mutate(pol_id = as.character(pol_id))
+
+# text file with sampling units
+sample_3130_aom <- read.table("../data/watersurfaces_2014/meetnet3130_aom_20140324.txt", ) 
+sample_3130_na <- read.table("../data/watersurfaces_2014/meetnet3130_na_20140324.txt") 
+sample_3140 <- read.table("../data/watersurfaces_2014/meetnet3140_20140324.txt") %>%
+  mutate(code = as.character(code))
+sample_3150 <- read.table("../data/watersurfaces_2014/meetnet3150_20140324.txt")  %>%
+  mutate(code = as.character(code))
+sample_3160 <- read.table("../data/watersurfaces_2014/meetnet3160_20140324.txt")%>%
+  mutate(code = as.character(code))
+
+sample_2014 <- bind_rows(sample_3130_aom,
+                         sample_3130_na,
+                         sample_3140,
+                         sample_3150,
+                         sample_3160) %>%
+  filter(steekproef == 1) %>%
+  select(pol_id = Pol_ID, sac = SBZH, type_target = code, phab, area_class = Opp_klasse, grts_ranking = Ranking, ranking_rel = rangnr) %>%
+  mutate(set = "selection2014",
+    area_class = ifelse(area_class == "(0,1e+04]", "Opp <= 1 ha",
+                             ifelse(area_class == "(1e+04,5e+04]", "1 ha < Opp <= 5 ha",
+                                    ifelse(area_class == "(5e+04,1e+05]", "5 ha < Opp < 50 ha",
+                                           ifelse(area_class == "(1e+05,2.5e+05]", "5 ha < Opp < 50 ha",
+                                                  ifelse(area_class == "(2.5e+05,5e+05]", "5 ha < Opp < 50 ha", NA))))),
+    area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha"))) %>%
+  mutate(pol_id = as.character(pol_id))
+
+sample_2014_ranking <- sample_2014 %>%
+  distinct(pol_id, grts_ranking)
+
+sample_2014_sf <- sample_2014_sf %>%
+  left_join(sample_2014_ranking, by = "pol_id") %>%
+  mutate(set = "selection2014")
+
+check_pol_id <- all.equal((sample_2014_sf %>%
+                      arrange(pol_id))$pol_id,
+                    (sample_2014 %>%
+                      arrange(pol_id))$pol_id %>%
+                      unique())
+```
+
+### Reproduce grts_ranking
+
+```{r}
+grts_master <- read_GRTSmh()
+
+sample_2014_ranking_centroid <- sample_2014_sf %>%
+  st_centroid() %>%
+  mutate(grts_ranking_centroid = grts_master[as(., "Spatial")])
+
+check_ranking <- sample_2014_ranking_centroid %>%
+  filter(grts_ranking != grts_ranking_centroid)
+
+```
+
+```{r}
+# read original refpoint data
+
+refpoint_3130_aom <- read_sf("../data/watersurfaces_2014/meetnet_3130_aom_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3130_na <- read_sf("../data/watersurfaces_2014/meetnet_3130_na_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3140 <- read_sf("../data/watersurfaces_2014/meetnet_3140_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY) 
+
+refpoint_3150 <- read_sf("../data/watersurfaces_2014/meetnet_3150_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY)
+
+refpoint_3160 <- read_sf("../data/watersurfaces_2014/meetnet_3160_versie20140324.shp") %>%
+  st_drop_geometry() %>%
+  select(pol_id = Pol_ID, x_centroid = centroidX, y_centroid = centroidY)
+
+sample_2014_refpoint <- bind_rows(refpoint_3130_aom, refpoint_3130_na, refpoint_3140, refpoint_3150, refpoint_3160) %>%
+  unique() %>%
+  mutate(x_refpoint = x_centroid,
+         y_refpoint = y_centroid) %>%
+  st_as_sf(coords = c("x_centroid", "y_centroid"), crs = 31370) %>%
+  mutate(grts_ranking = grts_master[as(., "Spatial")],
+         pol_id = as.character(pol_id))
+
+```
+
+```{r}
+ranking_refpoint <- sample_2014_refpoint %>%
+  st_drop_geometry() %>%
+  rename(grts_ranking_refpoint = grts_ranking)
+
+sample_2014_ranking_centroid_check <- sample_2014_ranking_centroid %>%
+  left_join(ranking_refpoint, by = "pol_id") %>%
+  filter(grts_ranking != grts_ranking_centroid)
+  
+```
+
+For 5 sampling units the originally determined grts-ranking differs from the reproduced grts-ranking.
+
++ the grts-ranking were switched for the polygons with pol_id 5083 and 16115 due to a manual error
+
++ different centroids were obtained for polygons with pol_id 19114, 19877, and 51206 (three polygons with 'islands')
+
+Below an example for polygon wit pol_id = 19144.
+The red is the originally calculated centroid, the blue dot the currently derived centroid.
+
+```{r}
+pol_different_centroid <- c("19114", "19877", "51206")
+
+show_polygons <- sample_2014_sf %>%
+  filter(pol_id == "19114") 
+
+show_centroids <- sample_2014_ranking_centroid %>%
+  filter(pol_id == "19114") 
+
+show_refpoints <- sample_2014_refpoint %>%
+  filter(pol_id == "19114") 
+
+show_polygons %>%
+ggplot() +
+  geom_sf() +
+  geom_sf(data = show_centroids,
+          colour = "blue", size = 4) +
+  geom_sf(data = show_refpoints,
+          colour = "red", size = 4)
+ 
+
+```
+
+We will set the grts-ranking of the sampling units to the currently determined rankings.
+We will use the variable grts_ranking_draw to document on which grts-ranking the sample was based. 
+So for 5 sampling units grts_ranking_draw will differ from grts_ranking.
+
+```{r}
+refpoints_2014 <- sample_2014_ranking_centroid %>%
+  select(pol_id, grts_ranking = grts_ranking_centroid)
+
+polygons_2014 <- sample_2014_sf %>%
+  rename(grts_ranking_draw = grts_ranking) %>%
+  left_join(st_drop_geometry(refpoints_2014), by = "pol_id") %>%
+  select(pol_id, sac, type_target_all, grts_ranking, grts_ranking_draw, set) 
+
+sample_2014 <- sample_2014 %>%
+  rename(grts_ranking_draw = grts_ranking) %>%
+  left_join(st_drop_geometry(refpoints_2014), by = "pol_id") %>%
+  mutate(source_polygon = "habitatmap")
+
+```
+
+
+
+### Overview of number of sampling units per strata
+
+```{r}
+overzicht_sample_2014 <- sample_2014 %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(samplesize = n_distinct(pol_id)) %>%
+  ungroup()
+```
+```{r}
+overzicht_sample_2014 %>%
+  spread(area_class, samplesize, fill = 0) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+## Available extra sampling units in 2016
+
+In 2016 it appeared that the selected sampling units in 2014 were not sufficient to reach the desired sample size.
+Additional sampling units were selected based on a preliminary version of the watersurfaces layer and the habitatmap version 2016.
+Since then, a sampling unit corresponds to a polygon of the watersurfaces layer.
+All watersurfaces that overlap with habitatmap polygons with 31xx habitat were selected, excluding habitatmap polygons in the 2014 sample that were already assessed in the field.
+We drew also a sample for 2190_a by selecting all watersurfaces in habitatmap polygons that contain dune habitat, manually excluding some artificial watersurfaces that cleary dit not correspond with 2190_a. 
+
+The files can be found in [this google drive folder](https://drive.google.com/drive/folders/1hXMgjTbiPWIgUv4cV3taNPRqAu7if1LS).
+
+```{r}
+sampleframe_31xx_2016_sf_orig <- read_sf("../data/watersurfaces_2016/Steekproef_31xx_extra_versie20160531.shp", crs = 31370)
+
+sampleframe_31xx_2016_orig <- read_csv2("../data/watersurfaces_2016/Steekproef_31xx.csv")
+
+sampleframe_2190_sf_orig <- read_sf("../data/watersurfaces_2016/Steekproefkader_2190_versie20170606.shp", crs = 31370) 
+
+sampleframe_31xx_2016 <- sampleframe_31xx_2016_orig %>%
+  select(pol_id = ID_Plas, type_target = Habsubt, sac = SBZH, area_class = OppKlasse, grts_ranking = Ranking, ranking_rel = RangNr, source_polygon = Type) %>%
+  mutate(set = "selection2016",
+         source_polygon = ifelse(source_polygon == "Polygoon blauwe laag", "watersurfaces", 
+                                 ifelse(source_polygon == "Polygoon habitatkaart", "habitatmap", NA)))
+
+polygon_id_type_target_all <- sampleframe_31xx_2016 %>%
+  group_by(pol_id) %>%
+  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  ungroup()
+
+sampleframe_31xx_2016_sf <- sampleframe_31xx_2016_sf_orig %>%
+  select(pol_id = ID_Plas,  grts_ranking = Ranking, sac = SBZH) %>%
+  mutate(sac = as.numeric(sac)) %>%
+  left_join(polygon_id_type_target_all, by = "pol_id") %>%
+  mutate(set = "selection2016")
+
+sampleframe_2190 <- sampleframe_2190_sf_orig %>%
+  st_drop_geometry() %>%
+  mutate(type_target = "2190") %>%
+  select(pol_id = ID_plas, type_target, sac = SBZH, area_class = OppKlasse, grts_ranking = Ranking, ranking_rel = Volgorde) %>%
+  mutate(set = "selection2016") %>%
+  mutate(pol_id = as.character(pol_id),
+         area_class = ifelse(area_class != "1 ha < Opp <= 5 ha", "Opp <= 1 ha", area_class),
+         source_polygon = "watersurfaces")
+
+sampleframe_2190_sf <- sampleframe_2190_sf_orig %>%
+  mutate(type_target_all = "2190") %>%
+  select(pol_id = ID_plas, grts_ranking = Ranking, sac = SBZH, type_target_all, selected = Steekproef) %>%
+  mutate(pol_id = as.character(pol_id),
+         set = "selection2016")
+  
+```
+
+
+
+### Reproduce grts-ranking
+
+We used the point_on_surface function to select reference points for the sampling units.
+The reference points are used to assign a grts_ranking to each sampling unit.
+
+```{r}
+sampleframe_2016_ranking_refpoint <- sampleframe_31xx_2016_sf %>%
+  bind_rows(sampleframe_2190_sf) %>%
+  st_point_on_surface() %>%
+  mutate(grts_ranking_refpoint = grts_master[as(., "Spatial")])
+
+check_ranking <- sampleframe_2016_ranking_refpoint %>%
+  filter(grts_ranking != grts_ranking_refpoint)
+
+check_ranking_2190 <- check_ranking %>%
+  mutate(rank_correct = rank(grts_ranking_refpoint),
+         selection_correct = rank_correct <= 60)
+
+sum(check_ranking_2190$selected == 1 & check_ranking_2190$selection_correct)
+```
+
+When reproducing the grts-ranking we find
+
++ a different grts_ranking for 5 sampling units selected for 31xx habitat types
+
++ a wrong grts_ranking for 2190 sampling units (reading the shape file with grts-ranking values converted the grts-ranking values to factor levels)
+
+We will use the variable grts_ranking_draw to indicate the originally used grts-ranking for drawing the sample.
+
+```{r}
+refpoints_2016 <- sampleframe_2016_ranking_refpoint %>%
+  select(pol_id, grts_ranking = grts_ranking_refpoint)
+
+polygons_2016 <- sampleframe_31xx_2016_sf %>%
+  bind_rows(sampleframe_2190_sf) %>%
+  rename(grts_ranking_draw = grts_ranking) %>%
+  left_join(st_drop_geometry(refpoints_2016), by = "pol_id") %>%
+  select(pol_id, sac, type_target_all, grts_ranking, grts_ranking_draw, set) 
+
+sampleframe_2016 <- sampleframe_31xx_2016%>%
+  bind_rows(sampleframe_2190) %>%
+  rename(grts_ranking_draw = grts_ranking) %>%
+  left_join(st_drop_geometry(refpoints_2016), by = "pol_id") %>%
+  mutate(area_class = ifelse(area_class == "> 50 ha", "Opp >= 50 ha", area_class),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha"))) 
+
+```
+
+Below the selected sampling units for 2190_a (yellow polygons) and the other sampling units of the sampling frame (red polygons) that are not selected. Dispite the use of an incorrect grts-ranking, selected sampling units seem quite well distrubted at first sight.  
+
+```{r}
+sampleframe_2190_sf_orig %>%
+  st_transform(4326) %>%
+  mutate(color_show = ifelse(Steekproef == 1, "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(color = ~color_show)
+```
+### Overview of number of sampling units per strata
+
+```{r}
+sampleframe_2016 %>%
+  group_by(type_target, sac, area_class) %>%
+  summarise(samplesize = n_distinct(pol_id)) %>%
+  ungroup() %>%
+  spread(area_class, samplesize, fill = 0) %>%
+  kable() %>%
+  kable_styling()
+```
+
+## Combine sample 2014 and sampleframe 2016
+
+We combine the selected sampling units in 2014 and the sampling units of the sampleframe in 2016.
+
+```{r}
+mhq_watersurfaces_samplingunits <- polygons_2014 %>%
+  bind_rows(polygons_2016) %>%
+  mutate(sac = as.logical(sac))
+
+mhq_watersurfaces_types <- sample_2014 %>%
+  bind_rows(sampleframe_2016) %>%
+  mutate(sac = as.logical(sac),
+         area_class = ifelse(area_class == "> 50 ha", "Opp >= 50 ha", as.character(area_class)),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", "Opp >= 50 ha")))
+
+mhq_watersurfaces_refpoints <- refpoints_2014 %>%
+  bind_rows(refpoints_2016)
+
+
+check_unique_pol_id <- nrow(mhq_watersurfaces_samplingunits) == n_distinct(mhq_watersurfaces_samplingunits$pol_id)
+check_unique_ranking <- nrow(mhq_watersurfaces_samplingunits) == n_distinct(mhq_watersurfaces_samplingunits$grts_ranking)
+check_types <- mhq_watersurfaces_types %>%
+  group_by(pol_id, type_target) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+watersurfaces_ranking_not_unique <- mhq_watersurfaces_samplingunits %>%
+  group_by(grts_ranking) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+```
+
+
+
+
+### Check for sampling units without unique grts_ranking
+
+Not all sampling units have a unique grts-ranking. See map below.
+
+```{r}
+watersurfaces_ranking_not_unique %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(set == "selection2014", "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(label = ~grts_ranking, color = ~show_color)
+```
+
+
+
+## Visualise data
+
+The map below shows: 
+
++ original sampling units selected in 2014 (yellow polygons)
+
++ potential extra sampling units selected in 2016 (red polygons)
+
++ reference points (markers)
+
+```{r}
+
+mhq_watersurfaces_samplingunits %>%
+  st_transform(crs = 4326) %>%
+  mutate(show_color = ifelse(set == "selection2014", "yellow", "red")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(label = ~type_target_all, color = ~show_color) %>%
+  addMarkers(data = st_transform(mhq_watersurfaces_refpoints, 4326), popup = ~pol_id)
+```
+
+Some sampling units selected in 2014 overlap with those of the 2016 sample frame. 
+
+
+```{r}
+
+sample_2014_overlap <- sample_2014_sf %>%
+  st_join(select(sampleframe_31xx_2016_sf, pol_id_overlap = pol_id), largest = TRUE) %>%
+  filter(!is.na(pol_id_overlap))
+
+sampleframe_2016_overlap <- sampleframe_31xx_2016_sf %>%
+  st_join(select(sample_2014_overlap, pol_id_overlap = pol_id), largest = TRUE) %>%
+  filter(!is.na(pol_id_overlap))
+
+sample_2014_overlap %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolygons(color = "yellow") %>%
+  addPolygons(data = st_transform(sampleframe_2016_overlap, 4326), color = "red")
+```
+
+
+
+
+```{r, eval = FALSE}
+mhq_watersurfaces_samplingunits %>%
+  st_write(dsn = "../output/mhq_watersurfaces.gpkg", layer = "samplingunits_original")
+
+mhq_watersurfaces_refpoints %>%
+  st_write(dsn = "../output/mhq_watersurfaces.gpkg", layer = "samplingunits_refpoints")
+
+```
+
+
+
+<!--chapter:end:10_sample_original.Rmd-->
+
 # Assessments of sampling units
 
 ## Admin data for watersurfaces
@@ -114,6 +622,7 @@ check <- assessments_mhq_watersurfaces %>%
   ungroup() %>%
   filter(n_recs > 1)
 
+
 check_any_type_target <- assessments_mhq_watersurfaces %>%
   filter(!is.na(type_observed)) %>%
   mutate(is_type_target_check = str_detect(type_target_all, type_observed)) %>%
@@ -154,26 +663,23 @@ assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
 ### Handle replacements
 
 ```{r}
-
-mhq_watersurfaces_refpoints_orig <- read_sf(dsn = "../output/mhq_watersurfaces_original.gpkg", layer = "refpoints_original")
-
 coord_extra <- mhq_watersurfaces_refpoints_extra %>%
   st_drop_geometry() %>%
   mutate(x = st_coordinates(mhq_watersurfaces_refpoints_extra)[,1],
          y = st_coordinates(mhq_watersurfaces_refpoints_extra)[,2]) %>%
   select(-grts_ranking_extra, -code_watersurfaces) 
 
-coord_sample_replaced <- mhq_watersurfaces_refpoints_orig %>%
+coord_sample_replaced <- mhq_watersurfaces_refpoints %>%
   st_drop_geometry() %>%
-  mutate(x_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
-         y_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
+  mutate(x_replaced = st_coordinates(mhq_watersurfaces_refpoints)[,1],
+         y_replaced = st_coordinates(mhq_watersurfaces_refpoints)[,2]) %>%
   select(-grts_ranking) %>%
   rename(pol_id_replaced = pol_id)
 
-coord_sample <- mhq_watersurfaces_refpoints_orig %>%
+coord_sample <- mhq_watersurfaces_refpoints %>%
   st_drop_geometry() %>%
-  mutate(x = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
-         y= st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
+  mutate(x = st_coordinates(mhq_watersurfaces_refpoints)[,1],
+         y= st_coordinates(mhq_watersurfaces_refpoints)[,2]) %>%
   select(-grts_ranking)
 
 replacement_31xx <- assessments_mhq_watersurfaces %>%
@@ -252,7 +758,7 @@ assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
   anti_join(replacement, by = "pol_id") %>%
   bind_rows(select(replacement, -x, -y, -x_replaced, -y_replaced, -code_watersurfaces_replaced))
 
-mhq_watersurfaces_refpoints <- mhq_watersurfaces_refpoints_orig %>%
+mhq_watersurfaces_refpoints <- mhq_watersurfaces_refpoints %>%
   bind_rows(select(mhq_watersurfaces_refpoints_extra, pol_id, grts_ranking = grts_ranking_extra, geometry = geom))
 ```
 
@@ -292,12 +798,12 @@ These sampling units are not assessed and therefore removed from the assessment 
 assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
   # filter(!str_detect(note, "te veel") | is.na(note)) 
   mutate(assessment = ifelse(str_detect(note, "te veel") & !is.na(note), FALSE, assessment),
-         is_type_target = ifelse(str_detect(note, "te veel") & !is.na(note), NA, is_type_target),
-         any_type_target = ifelse(str_detect(note, "te veel") & !is.na(note), NA, any_type_target))
+         is_type_target = ifelse(str_detect(note, "te veel"), NA, is_type_target),
+         any_type_target = ifelse(str_detect(note, "te veel"), NA, any_type_target))
 ```
 
 
-## Defining the spatial extent of the sampling units more precisely
+## Defining the spatial extent of the sampling unit more precisely
 
 The initial sampling units were selected based on the habitatmap. 
 The selected polygons did not always fully match with the actual watersurface and some polygons contain various watersurfaces.
@@ -472,7 +978,7 @@ check_visited_31xx <- mhq_watersurfaces_samplingunits2 %>%
   left_join(fraction_overlap, by = c("code_watersurfaces", "pol_id"))
 
 watersurfaces_no_target_type <- check_visited_31xx %>%
-  filter(n_overlap == 1 | (n_overlap > 1 & prop_overlap > 0.2)) %>%
+  filter(n_overlap == 1 | (n_overlap > 1 & prop_overlap > 0.5)) %>%
   select(pol_id, code_watersurfaces) %>%
   filter(!is.na(code_watersurfaces))
 
@@ -565,7 +1071,7 @@ watersurfaces_not_assessed_overlap_refpoints <- watersurfaces_not_assessed %>%
   mutate(grts_ranking_new = grts_master[as(., "Spatial")]) %>%
   select(pol_id, code_watersurfaces, grts_ranking_new, geometry = geom)
   
-assessments_watersurfaces_not_assessed <- assessments_mhq_watersurfaces %>%
+assessments_watersurfaces_not_assessed<- assessments_mhq_watersurfaces %>%
   semi_join(watersurfaces_not_assessed, by = "pol_id") %>%
   select(-code_watersurfaces) %>%
   left_join(watersurfaces_not_assessed, by = "pol_id") %>% #add code watersurfaces
@@ -619,9 +1125,6 @@ assessments_mhq_watersurfaces_double <- assessments_mhq_watersurfaces %>%
 
 mhq_refpoints_double <-  assessments_mhq_watersurfaces_double %>%
   distinct(pol_id, code_watersurfaces) %>%
-  group_by(code_watersurfaces) %>%
-  summarise(pol_id = str_c(pol_id, collapse = "; ")) %>%
-  ungroup() %>%
   left_join(watersurfaces, by = "code_watersurfaces") %>%
   st_as_sf() %>%
   st_point_on_surface() %>%
@@ -629,7 +1132,7 @@ mhq_refpoints_double <-  assessments_mhq_watersurfaces_double %>%
   select(pol_id, code_watersurfaces, grts_ranking, geometry = geom)
 
 assessments_mhq_watersurfaces_double <- assessments_mhq_watersurfaces_double %>%
-  left_join(st_drop_geometry(select(mhq_refpoints_double, -pol_id)), by = c("code_watersurfaces"))
+  left_join(st_drop_geometry(mhq_refpoints_double), by = c("pol_id", "code_watersurfaces"))
 
 assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
   anti_join(assessments_mhq_watersurfaces_double, by = "code_watersurfaces") %>%
@@ -666,63 +1169,35 @@ check <- mhq_watersurfaces_objects %>%
 
 check_geom <- !any(st_is_empty(mhq_watersurfaces_objects$geom))
 
-check_geom <- mhq_watersurfaces_objects %>%
-  filter(!st_is(mhq_watersurfaces_objects$geom, "POLYGON"))
 
 add_code_watersurfaces <- assessments_mhq_watersurfaces %>%
   filter(!is.na(code_watersurfaces)) %>%
-  distinct(pol_id, code_watersurfaces, grts_ranking) 
+  distinct(pol_id, code_watersurfaces, grts_ranking)
 
-mhq_watersurfaces_refpoints2 <- mhq_watersurfaces_refpoints %>%
-  filter(is.na(code_watersurfaces)) %>%
+mhq_watersurfaces_refpoints_2 <- mhq_watersurfaces_refpoints %>%
   select(-code_watersurfaces) %>%
   inner_join(add_code_watersurfaces, by = c("grts_ranking", "pol_id")) %>%
-  group_by(grts_ranking, code_watersurfaces) %>%
-  summarise(pol_id = str_c(unique(pol_id), collapse = ";")) %>%
-  ungroup() 
-
-mhq_watersurfaces_refpoints3 <- mhq_watersurfaces_refpoints %>%
-  filter(!is.na(code_watersurfaces)) %>%
-  bind_rows(mhq_watersurfaces_refpoints2) %>%
+  # group_by(grts_ranking, code_watersurfaces) %>%
+  # summarise(pol_id = str_c(unique(pol_id), collapse = ";")) %>%
+  # ungroup() %>%
   st_join(select(mhq_watersurfaces_objects, code_watersurfaces_check = code_watersurfaces)) %>%
   mutate(in_object = !is.na(code_watersurfaces_check) & code_watersurfaces_check == code_watersurfaces) %>%
   select(-code_watersurfaces_check) 
 # 
-check <- mhq_watersurfaces_refpoints3 %>%
-  group_by(code_watersurfaces) %>%
-  mutate(n = n()) %>%
-  ungroup() %>%
-  filter(n > 1)
-
-
-check_geom <- mhq_watersurfaces_refpoints3 %>%
-  filter(!st_is(mhq_watersurfaces_refpoints3$geometry, "POINT"))
-
-check_objects <- mhq_watersurfaces_objects %>%
-  filter(! code_watersurfaces %in% mhq_watersurfaces_refpoints3$code_watersurfaces)
-
-```
-
-
-```{r, eval = FALSE}
-mhq_watersurfaces_objects %>%
-  select(code_watersurfaces, grts_ranking) %>%
-  st_write("../output/watersurfaces_objects.gpkg")
-
-mhq_watersurfaces_refpoints3 %>%
-  st_drop_geometry() %>%
-  mutate(x = st_coordinates(mhq_watersurfaces_refpoints3)[,1],
-         y = st_coordinates(mhq_watersurfaces_refpoints3)[,2]) %>%
-  select(code_watersurfaces, grts_ranking, in_object, x, y) %>%
-  write_vc(file = "watersurfaces_refpoints", root = "../output" , sorting = c("grts_ranking", "code_watersurfaces"))
-
-mhq_watersurfaces_refpoints3 %>%
-  st_drop_geometry() %>%
-  select(pol_id, code_watersurfaces) %>%
-  st_write(dsn = "../output/mhq_watersurfaces_original.gpkg", layer = "link_samplinunits_watersurfaces", delete_layer = TRUE)
-  
+# check <- mhq_watersurfaces_refpoints_assessed %>%
+#   group_by(grts_ranking) %>%
+#   mutate(n = n()) %>%
+#   ungroup() %>%
+#   filter(n > 1)
+# 
+# check_geom <- !any(st_is_empty(mhq_watersurfaces_refpoints_assessed$geometry))
+# 
+# check_ranking <- mhq_watersurfaces_refpoints_assessed %>%
+#   mutate(grts_ranking_check = grts_master[as(., "Spatial")]) %>%
+#   filter(grts_ranking_check != grts_ranking)
 
 ```
+
 
 
 
@@ -734,11 +1209,14 @@ mhq_watersurfaces_objects %>%
   leaflet() %>%
   addTiles() %>%
   addPolygons(popup = ~str_c("code_ws: ", code_watersurfaces), group = "objects") %>%
-  addCircleMarkers(data = st_transform(mhq_watersurfaces_refpoints3, 4326), 
+  addCircleMarkers(data = st_transform(mhq_watersurfaces_refpoints_2, 4326), 
                    label = ~str_c("pol_id: ", pol_id, "code_ws: ", code_watersurfaces), group = "refpoints",
                    color = ~ifelse(in_object, "green", "red")) %>%
   addLayersControl(overlayGroups = c("objects", "refpoints"))
 ```
 
 ### 
+
+
+<!--chapter:end:20_admin_standingwater.Rmd-->
 

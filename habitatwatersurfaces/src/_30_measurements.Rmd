@@ -1,0 +1,17 @@
+# INBOVEG data
+
+```{r}
+path <- fileman_up("n2khab-mhq-data")
+
+header <- read_vc(root = path, file = "raw/inboveg_mhq_aq/header_mhq") %>%
+  filter(survey == "HT31xx_LSVI_StilstaandeWateren") %>%
+  mutate(code = str_sub(user_reference, 1, 10))
+
+measurements_points <- header %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(31370) %>%
+  st_join(watersurfaces)
+
+st_write(measurements_points, "../output/measurements_points.shp")
+```
+

@@ -284,7 +284,7 @@ samplesize_2021 <- watersurfaces_hab_overview %>%
 
 ```{r}
 samplesize_2021_overview <- samplesize_2021 %>%
-  filter(take_sample) %>%
+  #filter(take_sample) %>%
   select(type, sac, area_class, samplesize) %>%
   mutate(samplesize = round(samplesize)) %>%
   spread(key = area_class, value = samplesize, fill = 0)
