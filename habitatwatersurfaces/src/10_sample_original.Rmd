@@ -20,7 +20,8 @@ sample_2014_sf <- sample_2014_orig %>%
   select(pol_id = Pol_ID, sac = SBZH, type_target = doelhabt) %>%
   mutate(sac = ifelse(is.na(sac), 0, sac)) %>%
   group_by(pol_id, sac) %>%
-  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  arrange(type_target) %>%
+  summarise(type_target_all = str_c(type_target, collapse = ";")) %>%
   ungroup() %>%
   mutate(pol_id = as.character(pol_id))
 
@@ -252,7 +253,8 @@ sampleframe_31xx_2016 <- sampleframe_31xx_2016_orig %>%
 
 polygon_id_type_target_all <- sampleframe_31xx_2016 %>%
   group_by(pol_id) %>%
-  summarise(type_target_all = str_c(type_target, collapse = " + ")) %>%
+  arrange(type_target) %>%
+  summarise(type_target_all = str_c(type_target, collapse = ";")) %>%
   ungroup()
 
 sampleframe_31xx_2016_sf <- sampleframe_31xx_2016_sf_orig %>%
@@ -289,7 +291,7 @@ refpoints_habmap <- read_sf("../data/watersurfaces_2016/BWK_plassen_punten_20160
      
 refpoints_31xx <- refpoints_watersurfaces %>%
   bind_rows(refpoints_habmap) %>%
-  inner_join(select( sampleframe_31xx_2016, pol_id, grts_ranking ), by = "pol_id")
+  inner_join(distinct( sampleframe_31xx_2016, pol_id, grts_ranking ), by = "pol_id")
 
 refpoints_31xx <- refpoints_31xx %>%
   mutate(x_refpoint = st_coordinates(refpoints_31xx)[,1],

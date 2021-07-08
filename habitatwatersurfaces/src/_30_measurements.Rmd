@@ -1,17 +1,37 @@
 # INBOVEG data
 
 ```{r}
+
 path <- fileman_up("n2khab-mhq-data")
 
-header <- read_vc(root = path, file = "raw/inboveg_mhq_aq/header_mhq") %>%
+measurements_biotic_header <- read_vc(root = path, file = "raw/inboveg_mhq_aq/header_mhq") %>%
   filter(survey == "HT31xx_LSVI_StilstaandeWateren") %>%
-  mutate(code = str_sub(user_reference, 1, 10))
+  mutate(db_ref = str_sub(user_reference, 1, 10))
 
-measurements_points <- header %>%
+measurements_biotic_classif <- read_vc(root = path, file = "raw/inboveg_mhq_aq/classif_mhq") %>%
+  filter(survey == "HT31xx_LSVI_StilstaandeWateren") %>%
+  select(recording_givid, type_observed)
+
+measurements_biotic <- measurements_biotic_header %>%
+  left_join(measurements_biotic_classif, by = "recording_givid") %>%
+  select(recording_givid, db_ref, measurement_date = vague_date_begin, type_observed) %>%
+  mutate(type_observed = ifelse(type_observed == "-9", "gh", type_observed))
+
+measurements_points <- measurements_biotic_header %>%
   st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
   st_transform(31370) %>%
   st_join(watersurfaces)
 
 st_write(measurements_points, "../output/measurements_points.shp")
+```
+
+```{r}
+
+watersurfaces <- read_watersurfaces() %>%
+  select(code_watersurfaces = polygon_id)
+
+mhq_watersurfaces_measurements <- mhq_watersurfaces_overview %>%
+  filter(measurement_biotic) %>%
+  full_join(measurements_biotic, by = c("type_observed", "db_ref"))
 ```
 

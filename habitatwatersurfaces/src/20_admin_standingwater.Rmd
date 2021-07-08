@@ -608,14 +608,25 @@ check_double <- assessments_mhq_watersurfaces %>%
 
 assessments_mhq_watersurfaces_double <- assessments_mhq_watersurfaces %>%
   semi_join(check_double, by = "code_watersurfaces") %>%
-  group_by(code_watersurfaces, type_target_all, assessment, year_abiotic, year_biotic, type_observed, area_class_observed, n_target_types, any_type_target, measurement_biotic, measurement_abiotic, is_type_target, code_inboveg_replaced, pol_id_replaced, distance_replaced, inaccessible) %>%
-  summarise(pol_id = str_c(pol_id, collapse = ";"),
+  group_by(code_watersurfaces, type_target_all,  year_abiotic, year_biotic, type_observed, measurement_biotic, measurement_abiotic, code_inboveg_replaced, pol_id_replaced, distance_replaced) %>%
+  summarise(assessment = any(assessment),
+            inaccessible = ifelse(any(inaccessible == "long term"), "long term", NA),
+            pol_id = str_c(pol_id, collapse = ";"),
             grts_ranking_draw = min(grts_ranking_draw),
-            set = str_c(na.omit(set), collapse= ";"),
+            set = str_c(na.omit(unique(set)), collapse= ";"),
             monitoring_type = str_c(unique(monitoring_type), collapse= ";"),
+            is_type_target = all(is_type_target),
+            any_type_target = all(any_type_target),
             note = str_c(na.omit(note), collapse = ";"),
             replaced = any(replaced)) %>%
   ungroup() 
+
+check_double <- assessments_mhq_watersurfaces_double %>%
+  group_by(pol_id, type_observed) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
 
 mhq_refpoints_double <-  assessments_mhq_watersurfaces_double %>%
   distinct(pol_id, code_watersurfaces) %>%
@@ -647,7 +658,6 @@ mhq_watersurfaces_refpoints <- mhq_watersurfaces_refpoints %>%
 ## Standardize result
 
 
-### mhq_watersurfaces_objects and mhq_watersurface_refpoints
 
 ```{r}
 mhq_watersurfaces_objects <- assessments_mhq_watersurfaces %>%
@@ -701,6 +711,23 @@ check_geom <- mhq_watersurfaces_refpoints3 %>%
 check_objects <- mhq_watersurfaces_objects %>%
   filter(! code_watersurfaces %in% mhq_watersurfaces_refpoints3$code_watersurfaces)
 
+watersurfaces_refpoints <- mhq_watersurfaces_refpoints3 %>%
+  st_drop_geometry() %>%
+  mutate(x = st_coordinates(mhq_watersurfaces_refpoints3)[,1],
+         y = st_coordinates(mhq_watersurfaces_refpoints3)[,2]) %>%
+  select(code_watersurfaces, grts_ranking, in_object, x, y)
+```
+
++ watersurfaces_refpoints (git2rdata object): defines the reference point for the selected watersurfaces in the watersurfaces data source and grts-ranking for this refpoint
+  + watersurface_code
+  + grts_ranking
+  + in_object: is the reference point located within the watersurface
+  + x: x-coordinate (crs = 31370)
+  + y: y-coordinate (crs = 31370)
+
+```{r}
+watersurfaces_refpoints %>%
+  slice(1:5)
 ```
 
 
@@ -709,11 +736,7 @@ mhq_watersurfaces_objects %>%
   select(code_watersurfaces, grts_ranking) %>%
   st_write("../output/watersurfaces_objects.gpkg")
 
-mhq_watersurfaces_refpoints3 %>%
-  st_drop_geometry() %>%
-  mutate(x = st_coordinates(mhq_watersurfaces_refpoints3)[,1],
-         y = st_coordinates(mhq_watersurfaces_refpoints3)[,2]) %>%
-  select(code_watersurfaces, grts_ranking, in_object, x, y) %>%
+ watersurfaces_refpoints %>%
   write_vc(file = "watersurfaces_refpoints", root = "../output" , sorting = c("grts_ranking", "code_watersurfaces"))
 
 mhq_watersurfaces_refpoints3 %>%
@@ -725,10 +748,130 @@ mhq_watersurfaces_refpoints3 %>%
 ```
 
 
++ mhq_watersurfaces_assessments: table with assessment for the monitoring habitat quality programme
+  + code_watersurfaces
+  + type_target
+  + type_observed_all: all observed habitat types (a watersurface can contain more than one habitat type)
+  + assessment_source: field assessment or orthophoto
+  + assessment_date
+  + inaccessible: long term or short term
+  + is_type_target: does the target type correspond with (one of) the observed type(s)
 
+```{r}
+mhq_watersurfaces_overview <- assessments_mhq_watersurfaces %>%
+  filter(!is.na(assessment)) %>% 
+  mutate(year_biotic = ifelse(year_biotic == 0, NA, year_biotic),
+         assessment_year = pmin(year_abiotic, year_abiotic, na.rm = TRUE),
+         assessment_date = as.Date(str_c(assessment_year, "-01-01"))) %>%
+  mutate(assessment_source = ifelse(!is.na(assessment) & assessment, "field assessment", NA)) %>%
+  select(pol_id, code_watersurfaces, type_target_all, type_observed, assessment_source, assessment_date, inaccessible, is_type_target, measurement_biotic, measurement_abiotic, measurement_biotic_year = year_biotic, measurement_abiotic_year = year_abiotic, db_ref = code_inboveg)
+
+check_no_ws_code <- mhq_watersurfaces_overview %>%
+  filter(is.na(code_watersurfaces)) %>%
+  distinct(pol_id, type_target_all) %>%
+  left_join(select(mhq_watersurfaces_samplingunits, pol_id), by = "pol_id") %>%
+  st_as_sf() %>%
+  st_join(watersurfaces_hab$watersurfaces_polygons)
+
+
+mhq_watersurfaces_assessments <- mhq_watersurfaces_overview %>%
+  select(code_watersurfaces, type_target_all, type_observed, assessment_source, assessment_date, inaccessible, is_type_target) %>%
+  group_by(code_watersurfaces, type_target_all, assessment_source, assessment_date, inaccessible) %>%
+  arrange(type_observed) %>%
+  summarise(type_observed_all = str_c(type_observed, collapse = ";")) %>%
+  ungroup() %>%
+  separate_rows(type_target_all, sep = ";") %>%
+  rename(type_target = type_target_all) %>%
+  mutate(is_type_target = str_detect(string = type_observed_all, pattern =  type_target),
+         is_type_target = ifelse(is.na(is_type_target), FALSE, is_type_target)) %>%
+  filter(!(is.na(code_watersurfaces) & !is_type_target))
+
+mhq_watersurfaces_assessments %>%
+  write_vc(file = "mhq_watersurfaces_assessments", root = "../output", sorting = c("code_watersurfaces", "type_target"), strict = FALSE)
+
+```
+
+```{r}
+mhq_watersurfaces_assessments %>%
+  slice(1:5)
+```
+
++ mhq_watersurfaces_measurements: table with information on measurements
+  + code_watersurfaces
+  + db_ref: reference to record in INBOVEG database
+  + type_observed
+  + measurement_biotic: biotic measurement performed?
+  + measurement_abiotic: abiotic measurement performed?
+  + measurement_biotic_year: year of biotic measurement
+  + measurement_abiotic_year: year of abiotic measurement
 
 
 ```{r}
+mhq_watersurfaces_measurements <- mhq_watersurfaces_overview %>%
+  filter(measurement_abiotic | measurement_abiotic) %>%
+  select(code_watersurfaces, db_ref , type_observed, measurement_biotic, measurement_abiotic, measurement_biotic_year, measurement_abiotic_year) 
+
+mhq_watersurfaces_measurements %>%
+  write_vc(file = "mhq_watersurfaces_measurements", root = "../output", sorting = c("code_watersurfaces", "type_observed"), strict = FALSE)
+```
+
+```{r}
+mhq_watersurfaces_measurements %>%
+  slice(1:5)
+```
+
+```{r}
+types <- read_types() %>%
+    select(main_type, type, type_shortname, typeclass_name)
+
+schemes_mhq <- read_scheme_types() %>%
+    select(scheme, type) %>%
+    filter(str_sub(scheme, 1, 2) == "HQ") %>%
+    left_join(types, by = "type") %>%
+    select(scheme, type_target = type)
+
+mhq_watersurfaces_samplingunits_orig <- assessments_mhq_watersurfaces %>%
+  distinct(code_watersurfaces, grts_ranking, grts_ranking_draw, type_target_all) %>%
+  separate_rows(type_target_all, sep =";") %>%
+  rename(type_target = type_target_all) %>%
+  mutate(type_target = ifelse(type_target == "2190", "2190_a", type_target)) %>%
+  left_join(schemes_mhq, by = "type_target") %>%
+  select(scheme, code_watersurfaces, type_target, grts_ranking, grts_ranking_draw) %>%
+  filter(!is.na(code_watersurfaces)) %>%
+  filter(!is.na(type_target)) %>%
+  mutate(source_samplingunit = "original sample frame")
+
+mhq_watersurfaces_samplingunits_new <- assessments_mhq_watersurfaces %>%
+  filter(measurement_biotic | measurement_abiotic) %>%
+  filter(!is_type_target) %>%
+  filter(type_observed %in% mhq_watersurfaces_samplingunits_orig$type_target) %>%
+  mutate(type_target = type_observed,
+         grts_ranking_draw = ifelse(is.na(grts_ranking_draw), grts_ranking, grts_ranking_draw)) %>%
+  left_join(schemes_mhq, by = "type_target") %>%
+  select(scheme, code_watersurfaces, type_target, grts_ranking, grts_ranking_draw) %>%
+  mutate(source_samplingunit = "assessments monitoring cycle 1")
+
+mhq_watersurfaces_samplingunits <- mhq_watersurfaces_samplingunits_orig %>%
+  bind_rows(mhq_watersurfaces_samplingunits_new) %>%
+  mutate(scheme = ifelse(type_target == "2190_a", "HQ2190_aq", scheme)) %>%
+  group_by(scheme, code_watersurfaces, type_target, grts_ranking) %>%
+  summarise(grts_ranking_draw = min(grts_ranking_draw),
+            source_samplingunit = ifelse(any(source_samplingunit == "original sample frame"),
+                                             "original sample frame", unique(source_samplingunit))) %>%
+  ungroup()
+
+check <- mhq_watersurfaces_samplingunits %>%
+  group_by(scheme, code_watersurfaces, type_target) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+mhq_watersurfaces_samplingunits %>%
+  write_vc(file = "mhq_watersurfaces_samplingunits", root = "../output", sorting = c("scheme", "code_watersurfaces", "type_target"), strict = FALSE)
+```
+
+
+```{r, eval=FALSE}
 mhq_watersurfaces_objects %>%
   st_transform(4326) %>%
   leaflet() %>%
@@ -739,6 +882,3 @@ mhq_watersurfaces_objects %>%
                    color = ~ifelse(in_object, "green", "red")) %>%
   addLayersControl(overlayGroups = c("objects", "refpoints"))
 ```
-
-### 
-
