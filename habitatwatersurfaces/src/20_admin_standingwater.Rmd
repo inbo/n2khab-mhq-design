@@ -13,10 +13,11 @@ Both files can be found in [this google drive folder](https://drive.google.com/d
 ### Habitat types 31xx
 
 The admin data provide information on:
+
 + type observed
 + area class observed
 + the year in which an abiotic measurement was performed
-+ the yeat in which an biotic measurement was performed
++ the year in which an biotic measurement was performed
 + the code of the actual watersurface that was assessed (the polygons of the 2014 sample can contain several watersurfaces)
 + the code that is used in inboveg
 
@@ -275,7 +276,7 @@ assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
 ### Sampling units that were not considered for assessment
 
 When sampling units does not contain the target type new sampling units have to be selected based on the grts-ranking. 
-In some cases it was decided not the assess a new sampling unit that should have been selected according to the grts-ranking. 
+In some cases it was decided not to assess a new sampling unit that should have been selected according to the grts-ranking. 
 This because the new sampling unit was located in a region in which already sufficient sampling units were measured.
 
 ```{r}
@@ -748,7 +749,7 @@ mhq_watersurfaces_refpoints3 %>%
 ```
 
 
-+ mhq_watersurfaces_assessments: table with assessment for the monitoring habitat quality programme
++ watersurfaces_assessments: table with assessment for the monitoring habitat quality programme
   + code_watersurfaces
   + type_target
   + type_observed_all: all observed habitat types (a watersurface can contain more than one habitat type)
@@ -766,12 +767,12 @@ mhq_watersurfaces_overview <- assessments_mhq_watersurfaces %>%
   mutate(assessment_source = ifelse(!is.na(assessment) & assessment, "field assessment", NA)) %>%
   select(pol_id, code_watersurfaces, type_target_all, type_observed, assessment_source, assessment_date, inaccessible, is_type_target, measurement_biotic, measurement_abiotic, measurement_biotic_year = year_biotic, measurement_abiotic_year = year_abiotic, db_ref = code_inboveg)
 
-check_no_ws_code <- mhq_watersurfaces_overview %>%
-  filter(is.na(code_watersurfaces)) %>%
-  distinct(pol_id, type_target_all) %>%
-  left_join(select(mhq_watersurfaces_samplingunits, pol_id), by = "pol_id") %>%
-  st_as_sf() %>%
-  st_join(watersurfaces_hab$watersurfaces_polygons)
+# check_no_ws_code <- mhq_watersurfaces_overview %>%
+#   filter(is.na(code_watersurfaces)) %>%
+#   distinct(pol_id, type_target_all) %>%
+#   left_join(select(mhq_watersurfaces_samplingunits, pol_id), by = "pol_id") %>%
+#   st_as_sf() %>%
+#   st_join(watersurfaces_hab$watersurfaces_polygons)
 
 
 mhq_watersurfaces_assessments <- mhq_watersurfaces_overview %>%
@@ -782,8 +783,8 @@ mhq_watersurfaces_assessments <- mhq_watersurfaces_overview %>%
   ungroup() %>%
   separate_rows(type_target_all, sep = ";") %>%
   rename(type_target = type_target_all) %>%
-  mutate(is_type_target = str_detect(string = type_observed_all, pattern =  type_target),
-         is_type_target = ifelse(is.na(is_type_target), FALSE, is_type_target)) %>%
+  mutate(is_type_target = str_detect(string = type_observed_all, pattern =  type_target)) %>%
+  replace_na(list(is_type_target = FALSE, type_observed_all = "gh")) %>%
   filter(!(is.na(code_watersurfaces) & !is_type_target))
 
 mhq_watersurfaces_assessments %>%
@@ -820,6 +821,18 @@ mhq_watersurfaces_measurements %>%
   slice(1:5)
 ```
 
++ mhq_watersurfaces_samplingunits: table with information on mhq sampling untis
+  + scheme: name of the monitoring scheme
+  + sampling_unit_code: code for the sampling unit consisting of the watersurface code and the target type (necessary?; sampling unit always corresponds to the full watersurface, but a watersurface can contain different target type; a watersurface can belong to different schemes)
+  + code_watersurfaces
+  + grts_ranking: grts_ranking associated with the reference point of the watersurface/sampling unit
+  + grts_ranking_draw: the grts_ranking based on which the watersurface/sampling unit was selected
+  + type_target: the type for which the sampling unit was selected
+  + source_samplingunit: (not strictly necessary ?) distinguishes between 
+    + 'original sampling frame'
+    + 'assessment cycle 1'
+  
+  
 ```{r}
 types <- read_types() %>%
     select(main_type, type, type_shortname, typeclass_name)
@@ -853,21 +866,28 @@ mhq_watersurfaces_samplingunits_new <- assessments_mhq_watersurfaces %>%
 
 mhq_watersurfaces_samplingunits <- mhq_watersurfaces_samplingunits_orig %>%
   bind_rows(mhq_watersurfaces_samplingunits_new) %>%
-  mutate(scheme = ifelse(type_target == "2190_a", "HQ2190_aq", scheme)) %>%
+  mutate(scheme = ifelse(type_target == "2190_a", "HQ2190_aq", as.character(scheme))) %>%
   group_by(scheme, code_watersurfaces, type_target, grts_ranking) %>%
   summarise(grts_ranking_draw = min(grts_ranking_draw),
             source_samplingunit = ifelse(any(source_samplingunit == "original sample frame"),
                                              "original sample frame", unique(source_samplingunit))) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(sampling_unit_code = str_c(code_watersurfaces, type_target, sep = "_")) %>%
+  select(scheme, sampling_unit_code, code_watersurfaces, everything())
 
 check <- mhq_watersurfaces_samplingunits %>%
-  group_by(scheme, code_watersurfaces, type_target) %>%
+  group_by(scheme, sampling_unit_code) %>%
   mutate(n = n()) %>%
   ungroup() %>%
   filter(n > 1)
 
 mhq_watersurfaces_samplingunits %>%
-  write_vc(file = "mhq_watersurfaces_samplingunits", root = "../output", sorting = c("scheme", "code_watersurfaces", "type_target"), strict = FALSE)
+  write_vc(file = "mhq_watersurfaces_samplingunits", root = "../output", sorting = c("scheme", "sampling_unit_code"), strict = FALSE)
+```
+
+```{r}
+mhq_watersurfaces_samplingunits %>%
+  slice(1:5)
 ```
 
 
