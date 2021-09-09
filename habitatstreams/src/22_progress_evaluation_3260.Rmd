@@ -26,86 +26,29 @@ map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefve
 
 
 ```{r}
-sample_size_3260 <- read_vc(root =  "../output", file = "mhq_streams_sample_size")
+sample_size_3260_v2021 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2021")
+
+sample_size_3260_v2014 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2014")
 ```
 
-## Bijgewerkte steekproefgrootteberekening gebaseerd op habitatkaart v1.7
+## Bijgewerkte steekproefgrootteberekening in 2021
 
-- De initiële steekproefgrootte blijft ongewijzigd, maar de finite population correction wordt uitgevoerd op basis van het aantal populatie-eenheden (100m segmenten) in de habitatkaart 1.7
+- Om sneller trends in habitatkwaliteit te kunnen bepalen passen we het meetnet ontwerp aan:
+  -  De meetcyclus halveren we naar 6 jaar.
+  - De overbemonstering binnen en stroomafwaarts van SBZ-H verminderen we van 170 naar 80.
+
+- De finite population correction wordt uitgevoerd op basis van het aantal populatie-eenheden (100m segmenten) in de habitatkaart 1.7
 
 - We maken geen gebruik meer van stratum stroomgebiedgrootte. Dit was initieel wel zo omdat we er vanuit gingen dat in het stroomgebied > 10 km², we deels van VMM-meetpunten konden gebruik maken. Nu INBO de gegevensinzameling volledig zelf uitvoert, is het niet meer nodig om dit stratum te gebruiken. 
-
-
-```{r}
-n_flanders <- 80
-n_sac <- 170
-```
-
-
-```{r}
-calc_finite_samplesize <- function(N, n_infinite){
-  n_finite <- N * n_infinite/(n_infinite + (N - 1))
-  return(n_finite)
-}
-
-```
-
-
-```{r, warning = FALSE}
-
-map_3260_new_stdized <- map_3260_new %>%
-  mutate(temp_id = 1:nrow(.)) %>%
-  group_by(temp_id) %>%
-  mutate(length_3260 = drop_units(st_length(geometry))) %>%
-  ungroup() %>%
-  st_drop_geometry() %>%
-   mutate(sac_streams = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
-                      ifelse(SBZ == "buiten", "outside", NA))) %>%
-    dplyr::select(sac_streams, length_3260)
-           
-sac_3260 <- map_3260_new_stdized %>%
-  group_by(sac_streams) %>%
-  summarise(length_3260 = sum(length_3260)) %>%
-  mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
-  ungroup() %>%
-  mutate(N = length_3260/100)
-
-N_flanders <- round(sum(sac_3260$N), 0)
-
-N_sac <- (sac_3260 %>%
-  filter(sac_streams == "intersecting or downstream"))$N %>%
-  round(0)
-
-n_finite_flanders <- calc_finite_samplesize(N = N_flanders, n_infinite = n_flanders) %>%
-  round(0)
-
-n_finite_sac <- calc_finite_samplesize(N = N_sac, n_infinite = n_sac) %>%
-  round(0)
-
-proportion_outside <- (sac_3260 %>%
-  filter(sac_streams =="outside"))$proportion_3260
-
-n_finite_outside <- (n_finite_flanders * proportion_outside /100) %>%
-  round(0)
-
-sample_size <- data.frame(sac_streams = c("intersecting or downstream", "outside"),
-                      n_finite = c(n_finite_sac, n_finite_outside)) %>%
-  as_tibble()
-
-sample_size_3260 <- sac_3260 %>%
-  left_join(sample_size, by = "sac_streams") %>%
-  dplyr::select(-N)
-  
-write_vc(sample_size_3260, file = "mhq_streams_samplesize_v1_7", root = "../output", sorting = c("sac_streams"), strict = FALSE)
-```
 
 Onderstaande tabel geeft het resultaat van de steekproefgrootteberekening.
 
 ```{r tabelSteekproefgrootte}
-sample_size_3260 %>%
+
+sample_size_3260_v2021 %>%
   mutate(length_3260 = round(length_3260, 0),
          proportion_3260 = round(proportion_3260, 0)) %>%
-  kable(catption = "Eindige populatiegrootte (n_finite)") %>%
+  kable(caption = "Eindige populatiegrootte (n_finite)") %>%
   kable_styling()
 ```
 
@@ -122,7 +65,7 @@ admin <- admin_orig %>%
          sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
                       ifelse(SBZ == 0, "outside", SBZ)),
          type_observed = doelhabitat) %>%
-  dplyr::select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
+  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
 ```
 
 Er wordt gebruik gemaakt van onderstaande klassen:
@@ -169,7 +112,7 @@ assessments_3260 <- admin %>%
 ```{r}
 sample_assessments_3260 <- sample_frame_3260 %>%
   rename(sampling_unit_code = segment_id) %>%
-  left_join(dplyr::select(assessments_3260,  -sac_streams), by = "sampling_unit_code")
+  left_join(select(assessments_3260,  -sac_streams), by = "sampling_unit_code")
 ```
 
 ```{r}
@@ -199,10 +142,10 @@ progress_3260 <- assessments_3260 %>%
   group_by(sac_streams) %>%
   summarise(n_assessed = sum(!is.na(is_type_target)),
             n_inaccessable = sum(!is.na(inaccessible)),
-            n_unmeasurable = sum(!segment_measurable),
-            n_target_type = sum(is_type_target, na.rm = TRUE)) %>%
+            n_unmeasurable = sum(!segment_measurable, na.rm = TRUE),
+            n_target_type = sum(is_type_target & segment_measurable, na.rm = TRUE)) %>%
   ungroup() %>%
-  left_join(dplyr::select(sample_size_3260,  sac_streams, n_finite), by =c("sac_streams")) %>%
+  left_join(select(sample_size_3260_v2021,  sac_streams, n_finite), by =c("sac_streams")) %>%
   mutate(detection_rate_pct = round(n_target_type/ n_assessed * 100, 1),
            progress_pct = round(n_target_type/n_finite * 100, 1))
               
@@ -227,9 +170,13 @@ progress_3260 %>%
 
 ## Opgemeten punten in steekproef?
 
+`
+
+
 ```{r}
-sample_assessments_3260_not_valid <- sample_assessments_3260 %>%
-  left_join(sample_size_3260, by = "sac_streams") %>%
+sample_assessments_3260_check <- sample_assessments_3260 %>%
+  filter(is.na(assessment_date) | (is_type_target & segment_measurable)) %>%
+  left_join(sample_size_3260_v2021, by = "sac_streams") %>%
   group_by(sac_streams, grts_ranking) %>%
   mutate(volgorde_1 = rank(grts_ranking, ties.method = "random")) %>%
   ungroup() %>%
@@ -237,14 +184,16 @@ sample_assessments_3260_not_valid <- sample_assessments_3260 %>%
   mutate(volgorde_2 = rank(grts_ranking, ties.method = "min")) %>%
   ungroup() %>%
   mutate(volgorde = volgorde_2 + (volgorde_1 - 1) * 1000000,
-         in_sample_1_7 = volgorde <= n_finite) %>%
+         in_sample_v2021 = volgorde <= n_finite) %>%
   filter(is_type_target, segment_measurable) %>%
-  filter(!in_sample_1_7)
+  filter(!in_sample_v2021)
 ```
 
 
 
 ```{r}
+sample_1_7_prioritair <- read_csv2("../output/meetpuntent3260_prioritair_versie2020-05-20.csv")
+
 sample_1_4 <- read_vc(file = "sample_habitatstreams_v1_4", root = "../output") %>%
   mutate(sampling_unit_code = str_c("1_4_", segment_id)) %>%
   filter(sample)
@@ -254,9 +203,11 @@ sample_rapport  <- read_sf("../data/streams_original", "steekproef_3260_v2015-05
   st_drop_geometry() %>%
   mutate(sampling_unit_code = str_c("1_4_", segment_id))
 
-sample_assessments_3260_not_valid <- sample_assessments_3260_not_valid %>%
+sample_assessments_3260_not_valid <- sample_assessments_3260_check%>%
   mutate(in_sample_1_4 = sampling_unit_code %in% sample_1_4$sampling_unit_code,
-         in_sample_rapport = sampling_unit_code %in% sample_rapport$sampling_unit_code)
+         in_sample_rapport = sampling_unit_code %in% sample_rapport$sampling_unit_code,
+         in_sample_1_7 = sampling_unit_code %in% sample_1_7_prioritair$sampling_unit_code
+         )
 ```
 
 Onderstaande tabel geeft een overzicht van de opgemeten steekproefeenheden die niet in de steekproef versie 1.7 (volgens het steekproefkader versie 1.7) zitten. Drie daarvan zitten wel in de steekproef versie 1.4 (volgens het steekproefkader versie 1.7). 
@@ -282,7 +233,7 @@ sample_assessments_3260_not_valid %>%
 
 
 
-## Selectie af te werken meetpunten op basis van steekproefkader 1.7
+## Selectie af te werken meetpunten op basis van steekproefgrootte versie 2021
 
 Onderstaande tabel toont het aantal op te meten meetpunten (n_to_do). Op basis van de trefkans berekenen we het aantal bezoeken dat hier (bij benadering) voor nodig is (n_visits). 
 
@@ -290,8 +241,8 @@ Onderstaande tabel toont het aantal op te meten meetpunten (n_to_do). Op basis v
 
 sample_size_to_do <- progress_3260 %>%
   mutate(n_to_do = pmax(0, n_finite - n_target_type),
-         n_visits = ceiling(n_to_do/detection_rate_pct * 100)) %>%
-  dplyr::select( sac_streams, n_to_do, n_visits)
+         n_visits = ceiling(n_to_do/detection_rate_pct * 100) * 1.5) %>%
+  select( sac_streams, n_to_do, n_visits)
 
 ```
 
@@ -326,19 +277,22 @@ sample_to_do <- sample_assessments_3260 %>%
 
 sample_units_to_do <- sample_to_do %>%
   filter(to_do) %>%
-  dplyr::select(sampling_unit_code, sac_streams,  grts_ranking, volgorde, x, y) %>%
+  select(sampling_unit_code, sac_streams,  grts_ranking, volgorde, x, y) %>%
+  arrange(volgorde)
+
+sample_units_to_do_sf <- sample_units_to_do %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) %>%
   group_by(sampling_unit_code) %>%
   mutate(distance_to_map3260 = round(min(st_distance(geometry, map_3260_new)), 0),
          in_map3260 = drop_units(distance_to_map3260) < 10) %>%
-  ungroup()
+  ungroup() 
   
 ```
 
 
 ```{r figpunten, fig.width= 7}
 
-sample_units_to_do %>%
+sample_units_to_do_sf %>%
   st_transform(crs = 4326) %>%
   mutate(color_marker = ifelse(in_map3260, "blue", "red")) %>%
   leaflet() %>%
@@ -348,12 +302,20 @@ sample_units_to_do %>%
   
 ```
 
+```{r}
+
+write_csv2(sample_units_to_do, "../output/meetpunten3260_veldwerk2021_versie2021-05-21.csv")
+  
+```
+
 
 ## Output standaardiseren
 
 We standaardiseren het overzicht van de steekproefeenheden en de opmetingen op een analoge manier als bij de terrestrische meetpunten. We maken daarvoor gebruik van onderstaande tabellen.
 
 ```{r}
+grts_master <- read_GRTSmh()
+
 sample_assessments_3260_2 <- sample_assessments_3260 %>%
   filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do$sampling_unit_code) %>%
   mutate(grts_ranking_draw =grts_ranking,
@@ -434,7 +396,7 @@ mhq_streams_refpoints %>%
 
 
 ```{r}
-write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE)
+#write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE)
 ```
 
 ### mhq_streams_refpoints_validity
@@ -474,7 +436,7 @@ mhq_streams_refpoints_validity %>%
 ```
 
 ```{r}
-write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+#write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
 ```
 
 ### mhq_streams_assessments
@@ -516,7 +478,7 @@ mhq_streams_assessments %>%
 
 
 ```{r}
-write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"), strict = FALSE)
+#write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"), strict = FALSE)
 ```
 
 

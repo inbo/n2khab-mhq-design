@@ -1,8 +1,11 @@
 # Design monitoring scheme 3260
 
+
+## Original design
+
 Following code reproduces the original design of the 3260 monitoring scheme based on the report of [Westra et al. (2014)](https://pureportal.inbo.be/portal/nl/publications/monitoring-natura-2000habitats(d55c5f7a-f349-4ebd-8579-33121faf6f21).html).
 
-## 3260 map
+### 3260 map
 
 We used version 1.4 of habitatstreams as the basis for the sample frame. This version is not yet available on Zenodo. The file 'BasisbestandSteekproeftrekkingHT3260' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)) contains the map and also information on the different strata which are part of the design:
 
@@ -42,14 +45,16 @@ map_3260 <- map_3260_original %>%
 ```
 
 
-## Sample size
+### Sample size
 
 ```{r}
 n_flanders <- 80
 n_sac <- 170
+n_sac_update <- 80
+
 ```
 
-We choose an initial sample size of `r n_flanders` in Flanders and we oversample within sac and downstream of sac until a sample size of 170 is reached (for sac + downstream stratum). The sample is distributed over catchment area classes '< 10 km²' and '> 10 km²' proportional to the length of 3260 in each class.
+We choose an initial sample size of *n_flanders* in Flanders and we oversample within sac and downstream of sac until a sample size of *n_sac* is reached (for sac + downstream stratum). The sample is distributed over catchment area classes '< 10 km²' and '> 10 km²' proportional to the length of 3260 in each class.
 
 
 ```{r}
@@ -89,9 +94,9 @@ proportion_outside <- (sac_3260 %>%
 n_finite_outside <- (n_finite_flanders * proportion_outside /100) %>%
   round(0)
 
-sample_size <- data.frame(sac = c("intersecting or downstream", "outside"),
+sample_size<- tibble(sac = c("intersecting or downstream", "outside"),
                       n_finite = c(n_finite_sac, n_finite_outside)) %>%
-  as_tibble()
+  mutate(version = "v2014")
 
 sample_size_strata <- map_3260 %>%
   st_drop_geometry() %>%
@@ -100,28 +105,36 @@ sample_size_strata <- map_3260 %>%
   mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
   ungroup() %>%
   left_join(sample_size, by = "sac") %>%
-  mutate(n_finite_stratum = round(n_finite * proportion_3260/100, 0))
+  mutate(n_finite_stratum = round(n_finite * proportion_3260/100, 0)) %>%
+  arrange(version)
   
-write_vc(sample_size_strata, file = "mhq_streams_sample_size", root = "../output", sorting = c("sac", "catchment_area"))
+write_vc(sample_size_strata, file = "mhq_streams_samplesize_v2014", root = "../output", sorting = c("sac", "catchment_area", "version"), strict = FALSE)
 ```
+
+### Original sample size
+
+In Westra et al. (2014) it was decided to set n_sac to 170 and the monitoring cycle to 12 years.
 
 The following table shows the resulting finite sample size in each stratum. 
 
 ```{r}
 sample_size_strata %>%
+  select(version, everything()) %>%
   mutate(length_3260 = round(length_3260, 0),
          proportion_3260 = round(proportion_3260, 0)) %>%
   kable() %>%
-  kable_styling()
+  kable_styling() %>%
+  collapse_rows(c(1, 2))
 ```
 
 Note: in the report Westra et al. (2014) an error was made when distributing the sample size over the different strata. So the sample size for each stratum is different here, but correct.
 
-## Divide 3260 map into 100 m segments and assign GRTS-ranking each segment 
+
+### Divide 3260 map into 100 m segments and assign GRTS-ranking each segment 
 
 The sampling unit for 3260 is a 100 meter segment. Therefore we select points on the linesegments of the 3260 map every 100 meter using spsample. Each selected point corresponds with the beginning of a sampling unit.
 
-```{r}
+```{r, eval = FALSE}
 tot_length_3260 <- sum(sac_3260$length_3260)
 
 segmentpoints3260 <- spsample(as_Spatial(map_3260),
@@ -153,7 +166,7 @@ However we follow the aproach that was originally used.
 In a next step, we deselect all points with a distance of more than 32 meters to the center of the nearest GRTS-master cell, except for point on the Meuse river. 
 
 
-```{r}
+```{r, eval = FALSE}
 grts_master <- read_GRTSmh()
 
 segmentpoints3260 <- segmentpoints3260_2 %>%
@@ -193,7 +206,7 @@ st_crs(segmentpoints3260_final) <- 31370
 
 We compare the result with the original file 'steekproefkader_3260_v2015-05-28' (see [this google drive folder](https://drive.google.com/drive/folders/1i2cNnU3eJo4lbVeI23FGtv-6ljOV7M3L)).
 
-```{r}
+```{r, eval = FALSE}
 
 segmentpointsoriginal <- read_sf("../data/streams_original", "steekproefkader_3260_v2015-05-28", crs = 31370) %>%
   dplyr::select(Volgorde, RankingGRT, naam, ID)
@@ -226,25 +239,25 @@ check_points <- are_equal(compare1, compare2)
 
 The segment points for the 3260 type and the corresponding grts-ranking is exported as a table named 'samplingframe_habitatstreams_v1_4'. 
 
-```{r}
+```{r, eval = FALSE}
 
 habitatmap_streams_segments <-  segmentpoints3260_final %>%
   st_drop_geometry() %>%
   mutate(type = factor("3260", levels = levels(map_3260_v1_6$type)),
          x = (st_coordinates(segmentpoints3260_final))[,1],
          y = (st_coordinates(segmentpoints3260_final))[,2]) %>%
-  dplyr::select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
+  select(segment_id, river_name = name, wl_code, grts_ranking, x, y)
   
 #write_vc(habitatmap_streams_segments, file = "samplingframe_habitatstreams_v1_4", root = "../output", sorting = "segment_id")
 
 ```
 
-## Sample selection
+### Sample selection
 
 Finally, we select in each stratum the number of samples required based on the grts-ranking.
 The result is exported as a table named 'sample_habitatstreams_v1_4'.
 
-```{r}
+```{r, eval = FALSE}
 
 sample_3260 <- segmentpoints3260_final %>%
   st_drop_geometry() %>%
@@ -272,7 +285,7 @@ check_unique <- sample_3260 %>%
 
 Note: there are 2 segment points that are located in the same grts-master cell.
 
-```{r}
+```{r, eval = FALSE}
 sample_original <- read_sf("../data/streams_original", "steekproef_3260_v2015-05-28", crs = 31370) %>%
   dplyr::select(Volgorde, RankingGRT, naam, SBZ, starts_with("SGO"), ID) %>%
   rename(catchment_area = SGO__km.U.00B2._)
@@ -283,7 +296,138 @@ check <- sample_original %>%
   ungroup()
 ```
 
+## Update monitoring design in 2021
+
+### Update habitatmap streams
+
++ We will use [habitatstreams version 1.7]](https://zenodo.org/record/4420858#.YKYSH6gzagY)
+
++ The file 'BasisbestandSteekproefvernieuwingHT3260_SBZ', which is derived from habitatstreams version 1.7, contains information on the position relative to sac
 
 
 
+```{r}
+
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+
+habitatstreams <- read_habitatstreams()
+
+path <- fileman_up("n2khab_data")
+
+file <- "10_raw/habitatstreams/habitatstreams.shp"
+
+filepath <- file.path(path, file)
+
+version <- ifelse(md5sum(filepath) == "5c94b58c9dc7809c4eeeaf660aa3323c",
+                  "v1.7", "unknown") 
+
+```
+
+
+
+
+```{r}
+
+map_3260_new <- map_3260_new %>%
+  mutate(sac_streams = ifelse(SBZ %in% c("intersect SBZ", "sa"), "intersecting or downstream",
+                      ifelse(SBZ == "buiten", "outside", NA)))
+
+map_3260_new_stdized <- map_3260_new %>%
+  mutate(length_3260 = drop_units(st_length(geometry))) %>%
+  st_drop_geometry() %>%
+  select(sac_streams, length_3260)
+
+habitatstreams<- habitatstreams %>%
+  mutate(length_3260 = drop_units(st_length(geometry)))
+
+diff_length <- sum(map_3260_new_stdized$length_3260) - sum(habitatstreams$length_3260)
+# a small part of habitatstreams ('Boshovenloop') is not in BasisbestandSteekproefvernieuwingHT3260_SBZ, for this part sac_strams = outside
+
+map_3260_new_buffer <- map_3260_new %>%
+  st_buffer(1) %>%
+  select(sac_streams)
+
+habitatstreams_sac <-  habitatstreams %>%
+  st_join(map_3260_new_buffer, largest = TRUE) %>%
+  mutate(sac_streams = ifelse(is.na(sac_streams), "outside", sac_streams))
+
+```
+
+The map below shows rivers with 3260 habitat type and the postion relative to sac:
+
++ intersects with sac or downstream of sac (in blue)
++ outside of sac (in yellow)
+
+
+```{r}
+
+habitatstreams_sac %>%
+  st_transform(4326) %>%
+  mutate(sac_color = ifelse(sac_streams == "outside", "blue", "yellow")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines(color = ~sac_color, weight = 3, label = ~river_name) 
+
+```
+
+
+### Update sample size
+
+In 2021 we decided to decrease the monitoring cycle to 6 years in order to get better information on trends in habitat quality. 
+This was compensated by decreasing n_sac to 80.
+
+```{r, warning = FALSE}
+           
+sac_3260 <- habitatstreams_sac %>%
+  st_drop_geometry() %>%
+  group_by(sac_streams) %>%
+  summarise(length_3260 = sum(length_3260)) %>%
+  mutate(proportion_3260 = length_3260/sum(length_3260) * 100) %>%
+  ungroup() %>%
+  mutate(N = length_3260/100)
+
+N_flanders <- round(sum(sac_3260$N), 0)
+
+N_sac <- (sac_3260 %>%
+  filter(sac_streams == "intersecting or downstream"))$N %>%
+  round(0)
+
+n_finite_flanders <- calc_finite_samplesize(N = N_flanders, n_infinite = n_flanders) %>%
+  round(0)
+
+n_finite_sac <- calc_finite_samplesize(N = N_sac, n_infinite = n_sac_update) %>%
+  round(0)
+
+proportion_outside <- (sac_3260 %>%
+  filter(sac_streams =="outside"))$proportion_3260
+
+n_finite_outside <- (n_finite_flanders * proportion_outside /100) %>%
+  round(0)
+
+sample_size <- data.frame(sac_streams = c("intersecting or downstream", "outside"),
+                      n_finite = c(n_finite_sac, n_finite_outside)) %>%
+  as_tibble()
+
+sample_size_3260_update <- sac_3260 %>%
+  left_join(sample_size, by = "sac_streams") %>%
+  select(-N) %>%
+  mutate(version = "v2021")
+  
+write_vc(sample_size_3260_update, file = "mhq_streams_samplesize_v2021", root = "../output", sorting = c("sac_streams"), strict = FALSE)
+```
+
+In the table below the sample size for both versions are compared.
+
+```{r}
+
+sample_size_strata %>%
+  rename(sac_streams = sac) %>%
+  bind_rows(sample_size_3260_update) %>%
+  mutate(length_3260 = round(length_3260),
+         proportion_3260 = round(proportion_3260)) %>%
+  select(version, everything()) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(c(1,2,3, 6))
+```
 

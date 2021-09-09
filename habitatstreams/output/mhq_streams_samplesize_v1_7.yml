@@ -3,8 +3,8 @@
   optimize: yes
   NA string: NA
   sorting: sac_streams
-  hash: dcb54b0e04bf8aeea2afcd5f5b0816e992de27fd
-  data_hash: 6472a518ef58e7dadd7390959cf5fa00aeb62a0f
+  hash: c86df1780661d090b01f84cf991c13552c40ac91
+  data_hash: b6143e8a2a8a20fae75b36d65b719fb02c7bcc77
 length_3260:
   class: numeric
 proportion_3260:
@@ -12,4 +12,6 @@ proportion_3260:
 n_finite:
   class: numeric
 sac_streams:
+  class: character
+version:
   class: character

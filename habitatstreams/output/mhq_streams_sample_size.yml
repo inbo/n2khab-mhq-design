@@ -5,8 +5,9 @@
   sorting:
   - sac
   - catchment_area
-  hash: b19b651ad59beefd4e3eb575adafb7cb18e59714
-  data_hash: 6c80f443ecc9ef00a392da5435aa8e833332fa9a
+  - version
+  hash: 948c355a6bf920d7edf15da1d78af89f91aea02e
+  data_hash: 6f036664a2d3daa6bd0d5283425212177890cd94
 sac:
   class: character
 catchment_area:
@@ -19,3 +20,5 @@ n_finite:
   class: numeric
 n_finite_stratum:
   class: numeric
+version:
+  class: character
