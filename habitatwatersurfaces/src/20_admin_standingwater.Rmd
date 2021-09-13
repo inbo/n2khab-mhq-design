@@ -809,11 +809,15 @@ mhq_watersurfaces_refpoints3 %>%
     + Only the year was recorded, not the exact date. We convert the date to `year-01-01`
     + If the target type was not observed, the assessment year was not recorded. In this case we take the median of the years in which the assessments took place.
   + polygon_id: the id of the watersurface according to the data source `watersurfaces_hab` and/or `watersurfaces`
-  + type: the observed type (a watersurface can contain more than one type, so we can have more than one record for each assessment_date/polygon_id combination)
-  + is_habitat: 
-    + `TRUE` if a habitat type was observed
-    + `FALSE` if no habitat type was observed, altough a regional import biotope (rib) type might be present (the presence of rib types was not evaluated)
-    + `NA` if the type could not be determined 
+  + type: the evaluated type (one polygon can contain more than one type)
+  + is_present: 
+    + `TRUE` if the evaluated type was observed
+    + `FALSE` if the evaluated type was not observed
+    + `NA` if no assessment could be performed (watersurface is inaccessible) or if the type is unknown
+  + any_habitat: 
+    + `TRUE` if any habitat type was observed
+    + `FALSE` when the evaluated type is absent and also all other habitat types are absent (recorded as `gh`), altough a regional import biotope (rib) type might be present (the presence of rib types was not evaluated)
+    + `NA` when the evaluated type is absent but it is not known if any other type is present (recorded as `doelhabitat` = `nee`)
   + assessment_source: field assessment or orthophoto
   + inaccessible: long term or short term
 
@@ -822,7 +826,7 @@ mhq_watersurfaces_refpoints3 %>%
 
 mhq_watersurfaces_overview <- assessments_mhq_watersurfaces %>%
   filter(!is.na(assessment)) %>% 
-  filter(assessment) %>%
+  filter(assessment | !is.na(inaccessible)) %>%
   mutate(year_biotic = ifelse(year_biotic == 0, NA, year_biotic),
          assessment_year = pmin(year_abiotic, year_biotic, na.rm = TRUE),
          assessment_year = ifelse(is.na(assessment_year), median(assessment_year, na.rm = TRUE), assessment_year),
@@ -855,23 +859,37 @@ mhq_watersurfaces_overview <- mhq_watersurfaces_overview %>%
   mutate(type_observed = ifelse(type_observed == "2190", "2190_a", type_observed),
          type = ifelse(type_observed %in% c("gh", "unknown"), NA, type_observed),
          type = factor(type_observed, levels = levels(types$type)),
-         is_habitat = !is.na(type),
-         is_habitat = ifelse(type_observed == "unknown" & !is.na(type_observed), NA, is_habitat))
+         any_habitat = !is.na(type),
+         any_habitat = ifelse(type_observed == "unknown" & !is.na(type_observed), NA, any_habitat))
 
 
-mhq_watersurfaces_assessments <- mhq_watersurfaces_overview  %>%
-  select(assessment_date, polygon_id = code_watersurfaces, type, is_habitat, assessment_source, inaccessible) %>%
+type_present <- mhq_watersurfaces_overview  %>%
+  filter(!is.na(type)) %>%
+  mutate(is_present = TRUE) %>%
+  select(assessment_date, polygon_id = code_watersurfaces, type, is_present, any_habitat, assessment_source, inaccessible) %>%
   arrange(assessment_date, polygon_id, type)
   
-  # group_by(code_watersurfaces, type_target_all, assessment_source, assessment_date, inaccessible) %>%
-  # arrange(type_observed) %>%
-  # summarise(type_observed_all = str_c(type_observed, collapse = ";")) %>%
-  # ungroup() %>%
-  # separate_rows(type_target_all, sep = ";") %>%
-  # rename(type_target = type_target_all) %>%
-  # mutate(is_type_target = str_detect(string = type_observed_all, pattern =  type_target)) %>%
-  # replace_na(list(is_type_target = FALSE, type_observed_all = "gh")) %>%
-  # filter(!(is.na(code_watersurfaces) & !is_type_target))
+type_absent <- mhq_watersurfaces_overview %>%
+  group_by(code_watersurfaces, type_target_all, assessment_source, assessment_date, inaccessible) %>%
+  arrange(type_observed) %>%
+  summarise(type_observed_all = str_c(type_observed, collapse = ";")) %>%
+  ungroup() %>%
+  separate_rows(type_target_all, sep = ";") %>%
+  rename(type_target = type_target_all) %>%
+  mutate(is_type_target = str_detect(string = type_observed_all, pattern =  type_target)) %>%
+  filter(!is_type_target | is.na(is_type_target)) %>%
+  filter(!is.na(type_target)) %>%
+  mutate(is_present = ifelse(is.na(inaccessible), FALSE, NA),
+         any_habitat = ifelse(type_observed_all == "gh", FALSE, NA),
+         type = ifelse(type_target == "2190", "2190_a", type_target),
+         type = factor(type, levels = types$type)) %>%
+  select(assessment_date, polygon_id = code_watersurfaces, type, is_present, any_habitat, assessment_source, inaccessible)
+
+mhq_watersurfaces_assessments <- bind_rows(type_present,
+                                           type_absent) %>%
+   arrange(assessment_date, polygon_id, type)
+  
+  
 
 check_wc_code <- mhq_watersurfaces_assessments %>%
   anti_join(watersurfaces_hab$watersurfaces_types, by = "polygon_id")
@@ -892,9 +910,6 @@ mhq_watersurfaces_assessments %>%
   + polygon_id: the id of the watersurface according to the data source `watersurfaces_hab` and/or `watersurfaces`
   + db_ref: reference to record in INBOVEG database
   + type: the observed type (a watersurface can contain more than one type, so we can have more than one record for each assessment_date/polygon_id combination)
-  + is_habitat: 
-    + `TRUE` if a habitat type was observed
-    + `FALSE` if no habitat type was observed, altough a regional import biotope (rib) type might be present (the presence of rib types was not evaluated)
   + measurement_type: abiotic or biotic
 
 
@@ -902,14 +917,14 @@ mhq_watersurfaces_assessments %>%
 
 mhq_watersurfaces_measurements <- mhq_watersurfaces_overview %>%
   filter(measurement_abiotic | measurement_abiotic) %>%
-  select(code_watersurfaces, db_ref , type, is_habitat, type_observed, measured_biotic = measurement_biotic, measured_abiotic = measurement_abiotic, year_biotic = measurement_biotic_year, year_abiotic = measurement_abiotic_year) %>%
+  select(code_watersurfaces, db_ref , type,  type_observed, measured_biotic = measurement_biotic, measured_abiotic = measurement_abiotic, year_biotic = measurement_biotic_year, year_abiotic = measurement_abiotic_year) %>%
     pivot_longer(cols = c(measured_biotic, measured_abiotic, year_biotic, year_abiotic),
                  names_to = c(".value", "measurement_type"),
                  names_sep = "_") %>%
   filter(measured) %>%
   mutate(measurement_date = as.Date(str_c(year, "-01-01")),
          measurement_type = factor(measurement_type)) %>%
-  select(measurement_date, polygon_id = code_watersurfaces, db_ref, measurement_type, type, is_habitat) %>%
+  select(measurement_date, polygon_id = code_watersurfaces, db_ref, measurement_type, type) %>%
   arrange(measurement_date, polygon_id, measurement_type, type)
 
 mhq_watersurfaces_measurements %>%
@@ -996,7 +1011,8 @@ mhq_watersurfaces_populationunits <- mhq_watersurfaces_populationunits %>%
   ungroup() %>%
   mutate(sampling_unit_code = str_c(polygon_id, type, sep = "_")) %>%
   select(scheme, sampling_unit_code, polygon_id, everything()) %>%
-  filter(!is.na(polygon_id))
+  filter(!is.na(polygon_id)) %>%
+  arrange(type, grts_ranking_draw, polygon_id)
 
 
 
@@ -1007,12 +1023,12 @@ check <- mhq_watersurfaces_populationunits %>%
   filter(n > 1)
 
 mhq_watersurfaces_populationunits %>%
-  write_vc(file = "mhq_watersurfaces_populationunits", root = "../output", sorting = c("scheme", "sampling_unit_code"), strict = FALSE)
+  write_vc(file = "mhq_watersurfaces_populationunits", root = "../output", sorting = c('type', 'grts_ranking_draw', 'polygon_id'), strict = FALSE)
 ```
 
 ```{r}
 mhq_watersurfaces_populationunits %>%
-  slice(1:5)
+  slice(1:5, 400:405)
 ```
 
 

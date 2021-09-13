@@ -116,16 +116,10 @@ mhq_watersurfaces_populationunits_update <- mhq_watersurfaces_populationunits %>
   
 mhq_watersurfaces_assessments <- read_vc(file = "mhq_watersurfaces_assessments", root = "../output")
 
-mhq_type_observed <- mhq_watersurfaces_assessments %>%
-  distinct(polygon_id, type) %>%
-  mutate(assessed = TRUE) %>%
-  rename(type_observed = type)
-
 watersurfaces_populationunits <- mhq_watersurfaces_populationunits_update %>%
-  left_join(mhq_type_observed, by = "polygon_id") %>%
-  mutate(contains_type = type_observed == type,
-         assessed = ifelse(is.na(assessed), FALSE, assessed)) %>%
-  select(scheme, sampling_unit_code, polygon_id, type, type_observed, grts_ranking, grts_ranking_draw, source, assessed, contains_type)
+  left_join(mhq_watersurfaces_assessments, by = c("polygon_id", "type")) %>%
+  filter(is_present | is.na(is_present)) %>%
+  select(scheme, sampling_unit_code, polygon_id, type, grts_ranking, grts_ranking_draw, source)
 
 # watersurfaces_hab_3130 <- watersurfaces_hab_types %>%
 #   filter(type == "3130")
@@ -146,18 +140,16 @@ check <- watersurfaces_populationunits %>%
   ungroup() %>%
   filter(n > 1)
 
-watersurfaces_populationunits_select <- watersurfaces_populationunits %>%
-  filter(contains_type | is.na(contains_type)) %>%
-  select(-assessed, -contains_type, -type_observed) %>%
-  arrange(scheme, sampling_unit_code) %>%
-  unique()
-
-remove <- watersurfaces_populationunits_select %>%
+remove <- watersurfaces_populationunits %>%
   filter(source == "original sample frame") %>%
   anti_join(watersurfaces_hab_types, by = c("polygon_id", "type"))
 
-watersurfaces_populationunits_select <- watersurfaces_populationunits_select %>%
-  anti_join(remove, by = c("polygon_id", "type"))
+gh <- mhq_watersurfaces_assessments %>%
+  filter(!any_habitat)
+
+watersurfaces_populationunits_select <- watersurfaces_populationunits %>%
+  anti_join(remove, by = c("polygon_id", "type")) %>%
+  anti_join(gh, by = "polygon_id")
 
 check <- watersurfaces_populationunits_select %>%
   group_by(polygon_id, type) %>%
@@ -172,7 +164,7 @@ watersurfaces_populationunits_select %>%
 
 ```{r}
 watersurfaces_populationunits_select %>%
-  slice(1:5)
+  slice(1:5, 400:405)
 ```
 
 
