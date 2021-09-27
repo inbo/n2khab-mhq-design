@@ -104,10 +104,10 @@ mhq_watersurfaces_populationunits_new <-  watersurfaces_hab_types %>%
   filter(!(polygon_id %in% mhq_watersurfaces_populationunits_3130$polygon_id &
             type == "3130")) %>%
   # filter(!str_detect(polygon_id, "_v")) %>%
-  mutate(scheme = ifelse(type == "2190_a", "HQ2190_aq", str_c("HQ", str_sub(type, 1, 4))),
-         source = "watersurfaces_hab_v4") %>%
+  mutate(source = "watersurfaces_hab_v4") %>%
   left_join(select(watersurfaces_refpoints_update, polygon_id, grts_ranking), by = "polygon_id") %>%
   mutate(scheme = ifelse(type == "2190_a", "HQ2190_aq", str_c("HQ", str_sub(type, 1, 4))),
+         scheme = factor(scheme, levels = levels(schemes_mhq$scheme)),
          grts_ranking_draw = grts_ranking,
          sampling_unit_code = str_c(polygon_id, "_", type)) 
 

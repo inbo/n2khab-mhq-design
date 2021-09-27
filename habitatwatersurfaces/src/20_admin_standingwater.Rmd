@@ -823,7 +823,6 @@ mhq_watersurfaces_refpoints3 %>%
 
 ```{r}
 
-
 mhq_watersurfaces_overview <- assessments_mhq_watersurfaces %>%
   filter(!is.na(assessment)) %>% 
   filter(assessment | !is.na(inaccessible)) %>%
@@ -1003,7 +1002,6 @@ check_no_ws_code <- mhq_watersurfaces_populationunits %>%
 mhq_watersurfaces_populationunits <- mhq_watersurfaces_populationunits %>%
   left_join(check_no_ws_code, by = "pol_id") %>%
   mutate(polygon_id = ifelse(is.na(code_watersurfaces), as.character(polygon_id), code_watersurfaces)) %>%
-  mutate(scheme = ifelse(type == "2190_a", "HQ2190_aq", as.character(scheme))) %>%
   group_by(scheme, polygon_id, type, grts_ranking) %>%
   summarise(grts_ranking_draw = min(grts_ranking_draw),
             source = ifelse(any(source == "original sample frame"),
