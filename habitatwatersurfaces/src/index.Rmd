@@ -47,7 +47,7 @@ opts_chunk$set(
 )
 
 # remotes::install_github("inbo/n2khab",
-#                         ref = "dev_0.5.0")
+#                         ref = "dev_nextrelease")
 options(rgdal_show_exportToProj4_warnings = "none")
 options(stringsAsFactors = FALSE,
         scipen = 999, 
