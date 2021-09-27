@@ -14,3 +14,5 @@ LaTeX: XeLaTeX
 
 BuildType: Website
 WebsitePath: src
+
+SpellingDictionary: en_GB
