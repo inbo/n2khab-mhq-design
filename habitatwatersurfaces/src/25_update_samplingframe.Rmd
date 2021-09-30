@@ -23,7 +23,14 @@ tibble(
   kable_styling()
 
 watersurfaces_hab_types <- watersurfaces_hab$watersurfaces_types %>%
-  filter(! str_detect(type, "rbb")) 
+  filter(! str_detect(type, "rbb")) %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  group_by(polygon_id, main_type) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(!((type == main_type) & (n > 1))) %>%
+  select(-n, -main_type) #bij sommige polygonen zowel 3130 (meestal 3130_rbb..) als 3130_aom als type --> enkel 3130_aom behouden 
+
 ```
 
 ## Updating watersurface reference points
