@@ -602,8 +602,10 @@ Some of the assessed watersurfaces contain two of the original sampling units.
 This can be the case when two watersurfaces were merged in the latest version of the watersurfaces data source (which we use as a reference for defining the sampling units).  
 In this case the admin data contains two records for one watersurface, one for each of the original sampling units.
 However, both records refer to the same assessment and can be aggregated to one record.
-In this aggregation we set grts_ranking_draw to the minimum value of grts_ranking_draw for both original sampling units.
-After aggregation we recalculate the grts_ranking based on the watersurface polygon using st_point_on_surface. 
+In this aggregation we set grts_ranking and grts_ranking_draw to the minimum value of both original sampling units.
+After aggregation we should only have one reference point for the watersurface.
+Therefore we only keep the reference point of the original sampling unit with the lowest grts_ranking (and we remove the reference point of the other original sampling unit within the same watersurface). 
+This way we get only one referece point for each watersurface.
 
 ```{r}
 
@@ -940,8 +942,7 @@ mhq_watersurfaces_measurements %>%
 ```
 
 + mhq_watersurfaces_populationunits: table with information on mhq population units from which sampling units are drawn
-  + scheme: name of the monitoring scheme
-  + sampling_unit_code: code for the sampling unit consisting of the polygon_id and the target type 
+  + sampling_unit_code: code for the sampling unit, we take the current polygon_id as the sampling_unit_code 
   + polygon_id
   + grts_ranking: grts_ranking associated with the reference point of the watersurface/sampling unit
   + grts_ranking_draw: the grts_ranking based on which the watersurface/sampling unit was selected
@@ -955,18 +956,18 @@ mhq_watersurfaces_measurements %>%
 types <- read_types() %>%
     select(main_type, type, type_shortname, typeclass_name)
 
-schemes_mhq <- read_scheme_types() %>%
-    select(scheme, type) %>%
-    filter(str_sub(scheme, 1, 2) == "HQ") %>%
-    left_join(types, by = "type") %>%
-    select(scheme, type)
+# schemes_mhq <- read_scheme_types() %>%
+#     select(scheme, type) %>%
+#     filter(str_sub(scheme, 1, 2) == "HQ") %>%
+#     left_join(types, by = "type") %>%
+#     select(scheme, type)
 
 mhq_watersurfaces_populationunits_typetarget <- assessments_mhq_watersurfaces %>%
   filter(is_type_target) %>%
   mutate(type_observed = ifelse(type_observed == "2190", "2190_a", type_observed)) %>%
   mutate(type = factor(type_observed, levels = types$type)) %>%
-  left_join(schemes_mhq, by = "type") %>%
-  select(scheme, pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
+  # left_join(schemes_mhq, by = "type") %>%
+  select( pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
   mutate(source = "original sample frame/assessments monitoring cycle 1")
 
 mhq_watersurfaces_populationunits_notassessed <- assessments_mhq_watersurfaces %>%
@@ -974,8 +975,8 @@ mhq_watersurfaces_populationunits_notassessed <- assessments_mhq_watersurfaces %
   separate_rows(type_target_all, sep= ";") %>%
   mutate(type_target_all = ifelse(type_target_all == "2190", "2190_a", type_target_all)) %>%
   mutate(type = factor(type_target_all, levels = types$type)) %>%
-  left_join(schemes_mhq, by = "type") %>%
-  select(scheme, pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
+  # left_join(schemes_mhq, by = "type") %>%
+  select(pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
   mutate(source = "original sample frame")
 
 mhq_watersurfaces_populationunits_new <- assessments_mhq_watersurfaces %>%
@@ -985,8 +986,8 @@ mhq_watersurfaces_populationunits_new <- assessments_mhq_watersurfaces %>%
   mutate(type_observed = ifelse(type_observed == "2190", "2190_a", type_observed)) %>%
   mutate(type = factor(type_observed, levels = types$type),
          grts_ranking_draw = ifelse(is.na(grts_ranking_draw), grts_ranking, grts_ranking_draw)) %>%
-  left_join(schemes_mhq, by = "type") %>%
-  select(scheme, pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
+  # left_join(schemes_mhq, by = "type") %>%
+  select( pol_id, code_watersurfaces, type, grts_ranking, grts_ranking_draw) %>%
   mutate(source = "assessments monitoring cycle 1")
 
 mhq_watersurfaces_populationunits <- mhq_watersurfaces_populationunits_typetarget %>%
@@ -1006,20 +1007,20 @@ check_no_ws_code <- mhq_watersurfaces_populationunits %>%
 mhq_watersurfaces_populationunits <- mhq_watersurfaces_populationunits %>%
   left_join(check_no_ws_code, by = "pol_id") %>%
   mutate(polygon_id = ifelse(is.na(code_watersurfaces), as.character(polygon_id), code_watersurfaces)) %>%
-  group_by(scheme, polygon_id, type, grts_ranking) %>%
+  group_by(polygon_id, type, grts_ranking) %>%
   summarise(grts_ranking_draw = min(grts_ranking_draw),
             source = ifelse(any(source == "original sample frame"),
                                              "original sample frame", unique(source))) %>%
   ungroup() %>%
-  mutate(sampling_unit_code = str_c(polygon_id, type, sep = "_")) %>%
-  select(scheme, sampling_unit_code, polygon_id, everything()) %>%
+  mutate(sampling_unit_code = polygon_id) %>%
+  select(sampling_unit_code, polygon_id, everything()) %>%
   filter(!is.na(polygon_id)) %>%
   arrange(type, grts_ranking_draw, polygon_id)
 
 
 
 check <- mhq_watersurfaces_populationunits %>%
-  group_by(scheme, sampling_unit_code) %>%
+  group_by(sampling_unit_code) %>%
   mutate(n = n()) %>%
   ungroup() %>%
   filter(n > 1)

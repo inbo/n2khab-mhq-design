@@ -113,10 +113,8 @@ mhq_watersurfaces_populationunits_new <-  watersurfaces_hab_types %>%
   # filter(!str_detect(polygon_id, "_v")) %>%
   mutate(source = "watersurfaces_hab_v4") %>%
   left_join(select(watersurfaces_refpoints_update, polygon_id, grts_ranking), by = "polygon_id") %>%
-  mutate(scheme = ifelse(type == "2190_a", "HQ2190_aq", str_c("HQ", str_sub(type, 1, 4))),
-         scheme = factor(scheme, levels = levels(schemes_mhq$scheme)),
-         grts_ranking_draw = grts_ranking,
-         sampling_unit_code = str_c(polygon_id, "_", type)) 
+  mutate(grts_ranking_draw = grts_ranking,
+         sampling_unit_code = polygon_id) 
 
 mhq_watersurfaces_populationunits_update <- mhq_watersurfaces_populationunits %>%
   bind_rows(mhq_watersurfaces_populationunits_new)
@@ -126,7 +124,7 @@ mhq_watersurfaces_assessments <- read_vc(file = "mhq_watersurfaces_assessments",
 watersurfaces_populationunits <- mhq_watersurfaces_populationunits_update %>%
   left_join(mhq_watersurfaces_assessments, by = c("polygon_id", "type")) %>%
   filter(is_present | is.na(is_present)) %>%
-  select(scheme, sampling_unit_code, polygon_id, type, grts_ranking, grts_ranking_draw, source)
+  select( sampling_unit_code, polygon_id, type, grts_ranking, grts_ranking_draw, source)
 
 # watersurfaces_hab_3130 <- watersurfaces_hab_types %>%
 #   filter(type == "3130")
