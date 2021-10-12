@@ -780,7 +780,7 @@ watersurfaces_refpoints <- mhq_watersurfaces_refpoints3 %>%
 write_vc(watersurfaces_refpoints, "watersurfaces_refpoints", "../output", sorting = "polygon_id", strict = FALSE)
 ```
 
-+ watersurfaces_refpoints (git2rdata object): defines the reference point for the selected watersurfaces in the watersurfaces data source and grts-ranking for this refpoint
++ watersurfaces_refpoints (git2rdata object): defines the reference point for the watersurfaces in the original sampling frame and grts-ranking for this refpoint
   + polygon_id: the id of the watersurface according to the data source `watersurfaces_hab`
   + grts_ranking
   + in_object: is the reference point located within the watersurface
@@ -823,7 +823,7 @@ mhq_watersurfaces_refpoints3 %>%
   + any_habitat: 
     + `TRUE` if any habitat type was observed
     + `FALSE` when the evaluated type is absent and also all other habitat types are absent (recorded as `gh`), altough a regional import biotope (rib) type might be present (the presence of rib types was not evaluated)
-    + `NA` when the evaluated type is absent but it is not known if any other type is present (recorded as `doelhabitat` = `nee`)
+    + `NA` when the evaluated type is absent or unknown and it is not known if any other type is present (recorded as `doelhabitat` = `nee` or in case a watersurface is inaccessible)
   + assessment_source: field assessment or orthophoto
   + inaccessible: long term or short term
 
