@@ -67,6 +67,9 @@ library(readxl)
 library(INBOtheme)
 library(inbodb)
 library(openssl)
+library(crosstalk)
+library(DT)
+library(plotly)
 
 options(stringsAsFactors = FALSE)
 
