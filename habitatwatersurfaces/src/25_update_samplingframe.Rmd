@@ -94,7 +94,7 @@ We update the table as follows:
 
 + From the `watersurface_hab` data source we select all watersurface/type combinations that are not in the original sample frame.
 + We add the grts_ranking to the selected watersurfaces from the `watersurfaces_refpoints` table
-+ We add the new sampling units to the `mhq_watersurfaces_samplingunits` table. 
++ We add the new sampling units to the `mhq_watersurfaces_populationunits` table. 
 + Based on the mhq assessments we check if the target type was observed in the assessed watersurfaces. If not the watersurface is removed from the table. 
 + Population units (polygon_id/type combination) from the original sampling frame that not have been assessed yet and that do not occur in the latest version of watersurfaces_hab are removed 
 
