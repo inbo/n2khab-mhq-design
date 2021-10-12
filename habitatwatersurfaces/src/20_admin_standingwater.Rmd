@@ -364,7 +364,7 @@ check_measured_31xx %>%
   group_by(n_overlap) %>%
   summarise(n_pol = n_distinct(pol_id)) %>%
   ungroup() %>%
-  select("number of sampling units" = n_pol, "number of overlap with watersurfaces" = n_overlap) %>%
+  select("number of overlap with watersurfaces" = n_overlap, "number of sampling units" = n_pol) %>%
   kable() %>%
   kable_styling()
 ```
