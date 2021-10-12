@@ -67,6 +67,7 @@ library(readxl)
 library(INBOtheme)
 library(inbodb)
 library(openssl)
+library(renv)
 
 options(stringsAsFactors = FALSE)
 
