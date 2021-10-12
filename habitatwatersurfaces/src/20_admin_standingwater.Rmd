@@ -624,6 +624,7 @@ assessments_mhq_watersurfaces_double <- assessments_mhq_watersurfaces %>%
   summarise(assessment = any(assessment),
             inaccessible = ifelse(any(inaccessible == "long term"), "long term", NA),
             pol_id = str_c(pol_id, collapse = ";"),
+            grts_ranking = min(grts_ranking),
             grts_ranking_draw = min(grts_ranking_draw),
             set = str_c(na.omit(unique(set)), collapse= ";"),
             monitoring_type = str_c(unique(monitoring_type), collapse= ";"),
@@ -673,28 +674,32 @@ check_double3 <- assessments_mhq_watersurfaces_double %>%
   filter(n > 1)
 
 
-mhq_refpoints_double <-  assessments_mhq_watersurfaces_double3 %>%
-  distinct(pol_id, code_watersurfaces) %>%
-  group_by(code_watersurfaces) %>%
-  summarise(pol_id = str_c(pol_id, collapse = "; ")) %>%
-  ungroup() %>%
-  left_join(watersurfaces, by = "code_watersurfaces") %>%
-  st_as_sf() %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")]) %>%
-  select(pol_id, code_watersurfaces, grts_ranking)
 
-assessments_mhq_watersurfaces_double3 <- assessments_mhq_watersurfaces_double3 %>%
-  select(-grts_ranking) %>%
-  left_join(st_drop_geometry(select(mhq_refpoints_double, -pol_id)), by = c("code_watersurfaces"))
+# mhq_refpoints_double <-  assessments_mhq_watersurfaces_double3 %>%
+#   distinct(pol_id, code_watersurfaces) %>%
+#   group_by(code_watersurfaces) %>%
+#   summarise(pol_id = str_c(pol_id, collapse = "; ")) %>%
+#   ungroup() %>%
+#   left_join(watersurfaces, by = "code_watersurfaces") %>%
+#   st_as_sf() %>%
+#   st_point_on_surface() %>%
+#   mutate(grts_ranking = grts_master[as(., "Spatial")]) %>%
+#   select(pol_id, code_watersurfaces, grts_ranking)
+# 
+# assessments_mhq_watersurfaces_double3 <- assessments_mhq_watersurfaces_double3 %>%
+#   select(-grts_ranking) %>%
+#   left_join(st_drop_geometry(select(mhq_refpoints_double, -pol_id)), by = c("code_watersurfaces"))
 
 assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
   anti_join(assessments_mhq_watersurfaces_double3, by = "code_watersurfaces") %>%
   bind_rows(assessments_mhq_watersurfaces_double3)
 
+remove_refpoints_double <- check_double %>%
+  anti_join(assessments_mhq_watersurfaces_double3, by = c("grts_ranking", "code_watersurfaces")) %>%
+  select(pol_id, code_watersurfaces, grts_ranking, grts_ranking_draw)
+
 mhq_watersurfaces_refpoints <- mhq_watersurfaces_refpoints %>%
-  filter(! code_watersurfaces %in% mhq_refpoints_double$code_watersurfaces) %>%
-  bind_rows(mhq_refpoints_double)
+  filter(! pol_id %in% remove_refpoints_double$pol_id)
 
 ```
 
@@ -753,7 +758,6 @@ check <- mhq_watersurfaces_refpoints3 %>%
   mutate(n = n()) %>%
   ungroup() %>%
   filter(n > 1)
-
 
 check_geom <- mhq_watersurfaces_refpoints3 %>%
   filter(!st_is(mhq_watersurfaces_refpoints3$geom, "POINT"))
