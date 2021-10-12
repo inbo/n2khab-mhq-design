@@ -813,7 +813,7 @@ mhq_watersurfaces_refpoints3 %>%
   + is_present: 
     + `TRUE` if the evaluated type was observed
     + `FALSE` if the evaluated type was not observed
-    + `NA` if no assessment could be performed (watersurface is inaccessible) or if the type is unknown
+    + `NA` if no assessment could be performed (watersurface is inaccessible) or if the type's presence is unknown
   + any_habitat: 
     + `TRUE` if any habitat type was observed
     + `FALSE` when the evaluated type is absent and also all other habitat types are absent (recorded as `gh`), altough a regional import biotope (rib) type might be present (the presence of rib types was not evaluated)
