@@ -46,8 +46,8 @@ opts_chunk$set(
   message = FALSE
 )
 
-# remotes::install_github("inbo/n2khab",
-#                         ref = "dev_nextrelease")
+renv::restore()
+
 options(rgdal_show_exportToProj4_warnings = "none")
 options(stringsAsFactors = FALSE,
         scipen = 999, 
@@ -62,12 +62,10 @@ library(kableExtra)
 library(units)
 library(leaflet)
 library(units)
-library(renv)
 library(readxl)
 library(INBOtheme)
 library(inbodb)
 library(openssl)
-library(renv)
 
 options(stringsAsFactors = FALSE)
 
