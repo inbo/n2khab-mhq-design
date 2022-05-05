@@ -56,7 +56,6 @@ library(git2rdata)
 library(stars)
 library(raster)
 library(tidyverse)
-
 library(n2khab)
 library(kableExtra)
 library(units)
@@ -65,8 +64,6 @@ library(lwgeom)
 library(leaflet)
 library(units)
 library(renv)
-
-
 
 options(stringsAsFactors = FALSE)
 

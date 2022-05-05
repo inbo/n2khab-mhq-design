@@ -1,0 +1,475 @@
+# Voortgangsevaluatie meetnet habitat 3260
+
+## Inleiding
+
+In dit document evalueren we de voortgang van het meetnet habitatkwaliteit voor habitattype 3260 en selecteren we prioritair af te werken meetpunten. We maken hiervoor gebruik van de meest recente habitatkaart voor 3260 (versie 1.7).
+
+## Gebruikte data
+
+- meetpuntadministratie (origineel bestand = 'Monitoring3260_SVZ2020_VrToonWestra.xlsx'). See this [Google Drive folder](https://drive.google.com/drive/folders/14N1ObhUjKfvmjJcZSQ2vKtpuWA8PSiK7).
+
+```{r}
+admin_orig <- read.csv2("../data/adminstreams/Monitoring3260_SVZ2021_VrToonWestra.csv", stringsAsFactors = FALSE)
+```
+
+- steekproefkader afgeleid uit habitatkaart versie 1.7
+
+```{r}
+sample_frame_3260 <- read_vc(root =  "../output", file = "samplingframe_habitatstreams_v1_7")
+```
+
+- habitatkaart versie 1.7
+
+```{r}
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+```
+
+
+```{r}
+sample_size_3260_v2021 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2021")
+
+sample_size_3260_v2014 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2014")
+```
+
+## Bijgewerkte steekproefgrootteberekening in 2021
+
+- Om sneller trends in habitatkwaliteit te kunnen bepalen passen we het meetnet ontwerp aan:
+  -  De meetcyclus halveren we naar 6 jaar.
+  - De overbemonstering binnen en stroomafwaarts van SBZ-H verminderen we van 170 naar 80.
+
+- De finite population correction wordt uitgevoerd op basis van het aantal populatie-eenheden (100m segmenten) in de habitatkaart 1.7
+
+- We maken geen gebruik meer van stratum stroomgebiedgrootte. Dit was initieel wel zo omdat we er vanuit gingen dat in het stroomgebied > 10 km², we deels van VMM-meetpunten konden gebruik maken. Nu INBO de gegevensinzameling volledig zelf uitvoert, is het niet meer nodig om dit stratum te gebruiken. 
+
+Onderstaande tabel geeft het resultaat van de steekproefgrootteberekening.
+
+```{r tabelSteekproefgrootte}
+
+sample_size_3260_v2021 %>%
+  mutate(length_3260 = round(length_3260, 0),
+         proportion_3260 = round(proportion_3260, 0)) %>%
+  kable(caption = "Eindige populatiegrootte (n_finite)") %>%
+  kable_styling()
+```
+
+
+
+
+## Verkenning meetpuntadministratie
+
+```{r}
+admin <- admin_orig %>%
+  mutate(#sampling_unit_code = str_c("1_4_", IDToonW),
+         assessment_year = jaar.monitoring,
+         assessment_date = as.Date(datum.veldbezoek, format = "%d/%m/%Y"),
+         sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
+                      ifelse(SBZ == 0, "outside", SBZ)),
+         type_observed = doelhabitat) %>%
+  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
+```
+
+Er wordt gebruik gemaakt van onderstaande klassen:
+
+```{r}
+admin %>%
+  group_by(klasse) %>%
+  summarise(n_obs = n()) %>%
+  ungroup() %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+```{r}
+assessments_3260 <- admin %>%
+  filter(klasse != "") %>%
+  filter(!(klasse %in% c("niet meetellen (is vervangen)", "niet meetellen (2x bezocht)"))) %>%
+  mutate(inaccessible = ifelse(klasse == "uitval (ontoegankelijk)", "long term",
+                                  ifelse(klasse == "uitval (tijdelijk ontoegankelijk)", "short term", NA)),
+         is_type_target = ifelse(type_observed == "3260", TRUE,
+                                   ifelse(type_observed == "gh", FALSE, NA)),
+         segment_measurable = ! (klasse %in% c("uitval (ongeschikt)", "uitval (tijdelijk ongeschikt)")),
+         segment_measurable = ifelse(!is.na(inaccessible), NA, segment_measurable),
+         position_change = position_change == "ja") %>%
+  mutate(measured = is_type_target & !is.na(is_type_target) & segment_measurable & (is.na(inaccessible))) 
+
+# assessments_3260_replaced <- admin %>%
+#   filter(str_detect(field_code, "_o") | field_code == "SchNe_04o") %>%
+#   mutate(field_code = str_replace(field_code, "_o", ""),
+#          field_code = ifelse(field_code == "SchNe_04o", "SchNe_04", field_code)) %>%
+#   dplyr::select(field_code, sac, sampling_unit_code, catchment_area)
+# 
+# assessments_3260_position_change <- assessments_3260_all %>%
+#   filter(position_change) %>%
+#   dplyr::select(-sac, -catchment_area, -sampling_unit_code) %>%
+#   left_join(assessments_3260_replaced, by = "field_code")
+# 
+# assessments_3260 <- assessments_3260_all %>%
+#   filter(!position_change) %>%
+#   bind_rows(assessments_3260_position_change)
+#   
+```
+
+```{r}
+sample_assessments_3260 <- sample_frame_3260 %>%
+  rename(sampling_unit_code = segment_id) %>%
+  left_join(select(assessments_3260,  -sac_streams), by = "sampling_unit_code")
+```
+
+```{r}
+assessments_outside_sample_frame <- assessments_3260 %>%
+  filter(is_type_target) %>%
+  filter(!sampling_unit_code %in% sample_assessments_3260$sampling_unit_code)
+  
+```
+
+In volgende meetpunten (geselecteerd op basis van habitatkaart 1.4) werd habitattype 3260 waargenomen, ondanks dat ze niet overlappen met de habitatkaart v1.7. 
+
+De punten werden nagekeken door An Leyssen. Ze bevatten geen habitat meer.
+
+```{r}
+assessments_outside_sample_frame %>%
+  dplyr::select(field_code, sampling_unit_code, assessment_date, klasse) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+
+## Overzicht voortgang
+
+```{r}
+progress_3260 <- assessments_3260 %>%
+  group_by(sac_streams) %>%
+  summarise(n_assessed = sum(!is.na(is_type_target)),
+            n_inaccessable = sum(!is.na(inaccessible)),
+            n_unmeasurable = sum(!segment_measurable, na.rm = TRUE),
+            n_target_type = sum(is_type_target & segment_measurable, na.rm = TRUE),
+            n_measured = sum(measured)) %>%
+  ungroup() %>%
+  left_join(select(sample_size_3260_v2021,  sac_streams, n_finite), by =c("sac_streams")) %>%
+  mutate(detection_rate_pct = round(n_target_type/ n_assessed * 100, 1),
+           progress_pct = round(n_target_type/n_finite * 100, 1))
+              
+              
+```
+
+Volgende tabel toont:
+
+- Aantal bezoeken (n_assessed)
+- Aantal meetpunten ontoegankelijk (n_inaccessable)
+- Aantal meetpunten niet geschikt voor bemonstering (n_unmeasurable)
+- Aantal meetpunten die in doelhabitat vallen (n_target_type)
+- Gewenste steekproefgrootte (n_finite)
+- Trefkans (detection_rate_pct)
+- Voortgang (progress_pct)
+
+```{r progress}
+progress_3260 %>%
+  kable(caption = "Overzicht voortgang") %>%
+  kable_styling()
+```
+
+## Opgemeten punten in steekproef?
+
+`
+
+
+```{r}
+sample_assessments_3260_check <- sample_assessments_3260 %>%
+  filter(is.na(type_observed) | (is_type_target & segment_measurable)) %>%
+  left_join(sample_size_3260_v2021, by = "sac_streams") %>%
+  group_by(sac_streams, grts_ranking) %>%
+  mutate(volgorde_1 = rank(grts_ranking, ties.method = "random")) %>%
+  ungroup() %>%
+  group_by(sac_streams) %>%
+  mutate(volgorde_2 = rank(grts_ranking, ties.method = "min")) %>%
+  ungroup() %>%
+  mutate(volgorde = volgorde_2 + (volgorde_1 - 1) * 1000000,
+         in_sample_v2021 = volgorde <= n_finite) %>%
+  filter(is_type_target, segment_measurable) %>%
+  filter(!in_sample_v2021)
+```
+
+
+
+```{r}
+sample_1_7_prioritair <- read_csv2("../output/meetpuntent3260_prioritair_versie2020-05-20.csv")
+
+sample_1_4 <- read_vc(file = "sample_habitatstreams_v1_4", root = "../output") %>%
+  mutate(sampling_unit_code = str_c("1_4_", segment_id)) %>%
+  filter(sample)
+
+sample_rapport  <- read_sf("../data/streams_original", "steekproef_3260_v2015-05-28", crs = 31370) %>%
+  select(segment_id = ID, grts_ranking = RankingGRT, jaar = Jaar) %>%
+  st_drop_geometry() %>%
+  mutate(sampling_unit_code = str_c("1_4_", segment_id))
+
+sample_units_to_do2021 <- read_csv2("../output/meetpunten3260_veldwerk2021_versie2021-05-21.csv")
+
+sample_assessments_3260_not_valid <- sample_assessments_3260_check%>%
+  mutate(in_sample_1_4 = sampling_unit_code %in% sample_1_4$sampling_unit_code,
+         in_sample_rapport = sampling_unit_code %in% sample_rapport$sampling_unit_code,
+         in_sample_1_7 = sampling_unit_code %in% sample_1_7_prioritair$sampling_unit_code
+         )
+```
+
+Onderstaande tabel geeft een overzicht van de opgemeten steekproefeenheden die niet in de steekproef versie 1.7 (volgens het steekproefkader versie 1.7) zitten. Drie daarvan zitten wel in de steekproef versie 1.4 (volgens het steekproefkader versie 1.7). 
+Deze zitten niet meer in de laatste versie de steekproef omdat het steekproefkader is gewijzigd. 
+Twee punten zitten enkel in de steekproef die getrokken werd op basis van het rapport (Westra et al., 2014). 
+Hierin gebeurde er een fout bij de verdeling van de gewenste steekproefgrootte over de strata. Deze fout is nu rechtgezet. 
+De impact van deze fout is dus relatief beperkt. 
+
+Omdat de steekproefeenheden correct werden opgemeten volgens de toen geldende instructies, zullen we deze opnemen in de steekproef versie 1.7.
+
+We moeten er wel voor waken dat de steekproef voldoende representatief blijft voor de huidige doelpopulatie. 
+Maar we stellen voor om minstens twee opmetingen te doen per steekproefeenheid vooraleer verouderde steekproefeenheden (die niet meer geselecteerd zouden worden volgens de laatste versie van het steekproefkader) te vervangen.
+
+```{r}
+sample_assessments_3260_not_valid %>%
+  select(field_code, sampling_unit_code, assessment_date, is_type_target, in_sample_1_7, in_sample_1_4, in_sample_rapport) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+
+
+
+
+## Planning meetcyclus 2
+
+```{r}
+planning_cycle2 <- sample_assessments_3260 %>%
+  mutate(measured = ifelse(is.na(measured), FALSE, measured)) %>%
+  filter(is.na(type_observed) | measured) %>%
+  left_join(sample_size_3260_v2021, by = "sac_streams") %>%
+  group_by(sac_streams, grts_ranking) %>%
+  mutate(volgorde_1 = rank(grts_ranking, ties.method = "random")) %>%
+  ungroup() %>%
+  group_by(sac_streams) %>%
+  mutate(volgorde_2 = rank(grts_ranking, ties.method = "min")) %>%
+  ungroup() %>%
+  mutate(volgorde = volgorde_2 + (volgorde_1 - 1) * 1000000,
+         in_sample_cyclus2 = volgorde <= n_finite) %>%
+  filter(in_sample_cyclus2) 
+  
+set.seed(66332)
+
+planning_cycle2_panels <- planning_cycle2 %>%
+  group_by(sac_streams, measured) %>%
+  mutate(random_nr = runif(n = 1),
+         rank_used = ifelse(measured, 
+                            rank(assessment_year * 10000 + rank(grts_ranking)),
+                            rank(grts_ranking)),
+         panel_cyclus2 = ceiling((rank_used - random_nr) / n() * 6)) %>%
+  ungroup() %>%
+  mutate(jaar_cyclus2 = panel_cyclus2 + 2022 - 1,
+         verschil_jaren = jaar_cyclus2 - assessment_year) %>%
+  mutate(jaar_cyclus2 = ifelse(verschil_jaren == 4 & !is.na(verschil_jaren), jaar_cyclus2 + 1, jaar_cyclus2),
+         panel_cyclus2 = ifelse(verschil_jaren == 4 & !is.na(verschil_jaren), panel_cyclus2 + 1, panel_cyclus2))
+
+n_panels <- planning_cycle2_panels %>%
+  group_by(jaar_cyclus2) %>%
+  summarise(n_meetpunten = n(),
+            n_bestaande_meetpunten = sum(measured),
+            n_nieuwe_meetpunten = sum(!measured)) %>%
+  ungroup()
+
+
+```
+
+```{r}
+n_panels %>%
+  kable() %>%
+  kable_styling()
+```
+
+```{r}
+mhq_streams_cyclus2 <- planning_cycle2_panels %>% 
+  mutate(type_meetpunt = ifelse(measured, "Bestaand meetpunt", "Nieuw meetpunt"),
+         punt_verplaatst = ifelse(position_change, "ja", "nee"),
+         x = ifelse(is.na(x_assessment), x, x_assessment),
+         y = ifelse(is.na(y_assessment), y, y_assessment)) %>%
+  select(sampling_unit_code, field_code, punt_verplaatst, grts_ranking_draw = grts_ranking, sac_streams, type_meetpunt, punt_verplaatst, datum_opname_cyclus1 = assessment_date, jaar_cyclus2, x, y ) %>%
+  arrange(jaar_cyclus2, grts_ranking_draw)
+
+write_csv2(mhq_streams_cyclus2, "../output/meetpunten3260_cyclus2_versie2022-05-05.csv", na = "")
+```
+
+
+
+
+## Output standaardiseren
+
+We standaardiseren het overzicht van de steekproefeenheden en de opmetingen op een analoge manier als bij de terrestrische meetpunten. We maken daarvoor gebruik van onderstaande tabellen.
+
+```{r}
+grts_master <- read_GRTSmh()
+
+sample_assessments_3260_2 <- sample_assessments_3260 %>%
+  filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do$sampling_unit_code) %>%
+  mutate(grts_ranking_draw =grts_ranking,
+         type_target = "3260",
+         scheme = "MHQ3260",
+         distance = round(sqrt((x - x_assessment)^2 + (y - y_assessment)^2), 0)) %>%
+  group_by(grts_ranking_draw) %>%
+  mutate(point_code = str_c(grts_ranking_draw, "_", rank(x,y))) %>%
+  ungroup() %>%
+  left_join(sample_rapport, by = c("grts_ranking", "sampling_unit_code"))
+
+
+sample_assessments_3260_replaced <- sample_assessments_3260_2 %>%
+  filter(position_change) %>%
+  mutate(x = x_assessment,
+         y = y_assessment) %>%
+  st_as_sf(coords = c("x_assessment", "y_assessment"), crs = 31370) %>%
+  mutate(grts_ranking = grts_master[as(., "Spatial")],
+         point_code = str_c(grts_ranking_draw, "_2")) %>%
+  st_drop_geometry()
+
+
+sample_assessments_3260_original <- sample_assessments_3260_2 %>%
+  mutate(field_code = ifelse(position_change, NA, field_code),
+         segment_measurable = ifelse(position_change, FALSE, segment_measurable),
+         type_observed = ifelse(position_change, NA, type_observed),
+         is_type_target = ifelse(position_change, NA, is_type_target),
+         position_change = FALSE,
+         distance = 0)
+  
+sample_assessments_3260_update <- sample_assessments_3260_original %>%
+  bind_rows(sample_assessments_3260_replaced) %>%
+  mutate(segment_id = sampling_unit_code,
+         sampling_unit_code = str_c(grts_ranking, "_3260"),
+         x = round(x, 2),
+         y = round(y, 2),
+         sac_streams = factor(sac_streams))
+       
+```
+
+
+### mhq_streams_refpoints
+
+De tabel 'mhq_streams_refpoints' geeft een overzicht van de zogenaamde referentiepunten voor alle steekproefeenheden in het meetnet voor habitattype 3260. Elke steekproefeenheid heeft een referentiepunt waar naar toe genavigeerd wordt om de meting uit te voeren. Bij stromende wateren is het referentiepunt het startpunt van het 100 meter segment (en meer specifiek het meest stroomafwaarts gelegen punt van het segment).
+
+De tabel bestaat uit volgende variabelen:
+
++ scheme: code voor het meetnet;
++ sampling_unit_code: code voor de steekproefeenheid;
++ segment_id: id van het riviersegment;
++ point_code: code voor het referentiepunt;
++ type_target: doelhabitat;
++ sac_streams: positie t.o.v. speciale beschermingszone (SBZ) met onderscheid tussen:
+  + buiten SBZ ('outside')
+  + intersectie met SBZ of stroomafwaarts van SBZ ('intersecting or downstream');
++ grts_ranking: grts-rangnummer van grts-hok waarbinnen referentiepunt gelegen is;
++ grts_ranking_draw: grts-rangnummer op basis waarvan de steekproeftrekking is gebeurd. In de meeste gevallen is dit gelijk aan de grts_ranking, maar als een referentiepunt verplaatst wordt omdat het originele referentiepunt niet geschikt is, behouden we de grts-ranking van het originele referentiepunt voor grts_ranking_draw ook als het nieuwe punt in een ander grts-hok gelegen is (met een andere grts-ranking);
++ legacy_site: gaat het om een al langer bestaand meetpunt? 
++ x- en y-coördinaten van het referentiepunt;
++ db_ref: een andere referentie voor een steekproefeenheid die in een databank gebruikt wordt.
+
+```{r}
+mhq_streams_refpoints <- sample_assessments_3260_update %>%
+  mutate(legacy_site = FALSE,
+         db_ref = field_code) %>%
+  select(scheme, sampling_unit_code, segment_id, point_code, type_target, sac_streams, grts_ranking, grts_ranking_draw, legacy_site, x, y, db_ref) %>%
+  arrange(grts_ranking_draw, point_code)
+```
+
+Als voorbeeld tonen we de eerste zes rijen van de tabel.
+
+```{r}
+mhq_streams_refpoints %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+```{r}
+#write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE)
+```
+
+### mhq_streams_refpoints_validity
+
+De tabel 'mhq_streams_refpoints_validity' geeft aan welke steekproefeenheden voldoen aan de voorwaarden om opgenomen te worden in het biotisch meetnet habitatkwaliteit voor 3260.
+
+De tabel bestaat uit volgende variabelen:
+
++ scheme
++ sampling_unit_code
++ point_code
++ date: datum waarop de beoordeling is gebeurd
++ is_valid_type: komt het geobserveerde habitattype overeen met het doelhabitat?
++ is_valid_refpoint: is er een LSVI-meting mogelijke in het segment/referentiepunt?
++ is_valid: is het een geldig meetpunt? 
+
+'is_valid' is TRUE als zowel 'is_valid_type' als 'is_valid_refpoint' TRUE zijn. 
+
+
+```{r}
+mhq_streams_refpoints_validity <- sample_assessments_3260_update %>%
+  arrange(grts_ranking_draw, point_code) %>%
+  mutate(is_valid_type = is_type_target,
+         is_valid_refpoint = segment_measurable & is.na(inaccessible),
+         is_valid = is_valid_type & is_valid_refpoint) %>%
+  select(scheme, sampling_unit_code, point_code, date = assessment_date, is_valid, is_valid_type, is_valid_refpoint) 
+```
+
+Als voorbeeld tonen we de eerste zes rijen van de tabel.
+
+```{r}
+mhq_streams_refpoints_validity %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+```{r}
+#write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+```
+
+### mhq_streams_assessments
+
+De tabel 'mhq_streams_assessments' geeft een overzicht van de beoordelingen (assessments) van de steekrpoefeenheden.
+
+De tabel bevat volgende variabelen:
+
++ segment_id
++ point_code
++ type_target
++ is_type_target: geeft aan of de steekproefeenheid al dan niet doelhabitat bevat
++ type_observed: geobserveerde doelhabitat
++ inaccessible: geeft aan als een steekproefeenheid ontoegankelijk is
++ measurable: geeft aan of er een LSVI-meting kan uitgevoerd worden in een steekproefeenheid
++ assessment_date: datum van bezoek
++ assessment_source: type beoordeling met onderscheid tussen
+  + beoordeling op basis van een terreinbezoek ('field assessment')
+  + beoordeling op basis van orthofoto controle ('orthophoto')
++ fieldwork_team: team dat bezoek heeft uitgeveord (INBO of ANB)
+
+```{r}
+mhq_streams_assessments <- sample_assessments_3260_update %>%
+  arrange(grts_ranking_draw, point_code) %>%
+  mutate(fieldwork_team = "INBO",
+         assessment_source = "field assessment",
+         type_observed = ifelse(type_observed == "ongekend (geen opname)", NA, type_observed)) %>%    
+  select(segment_id, point_code, type_target, is_type_target, type_observed, inaccessible, measurable = segment_measurable, assessment_date, assessment_source, fieldwork_team, x, y) 
+
+```
+
+```{r}
+mhq_streams_assessments %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+
+```{r}
+#write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"), strict = FALSE)
+```
+
+
