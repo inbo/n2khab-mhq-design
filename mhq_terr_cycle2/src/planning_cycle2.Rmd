@@ -821,8 +821,11 @@ grts_habmap <- read_vc(file = "design-strategy/output/samplingframe_habitatterr_
 
 su_sf <- sampling_units_panels %>%
   filter(!legacy_site) %>%
+  filter(!measured_cycle1) %>%
+  mutate(x_coord = round(x_coord, 1),
+         y_coord = round(y_coord, 1)) %>%
+  distinct(polygon_id, point_code, x_coord, y_coord) %>%
   st_as_sf(coords = c("x_coord", "y_coord"), crs = 31370)
-
 
 for(i in 1:nrow(su_sf)) {
   
@@ -852,16 +855,21 @@ for(i in 1:nrow(su_sf)) {
 
 st_crs(buffers) <- 31370
 
-buffers_all <- buffers %>%
-  mutate(buffer = "ja") %>%
-  group_by(buffer) %>%
-  summarise(n  = n()) %>%
-  ungroup()
+# buffers_all <- buffers %>%
+#   mutate(buffer = "ja") %>%
+#   group_by(buffer) %>%
+#   summarise(n  = n()) %>%
+#   ungroup()
 
+polygonen_point_code <- su_sf %>%
+  st_drop_geometry() %>%
+  group_by(polygon_id) %>%
+  summarise(point_code_inpolygon = str_c(point_code, collapse = ";")) %>%
+  ungroup()
 
 vervangpunten <- grts_habmap %>%
   mutate(grts_ranking_draw = grts_ranking) %>%
-  semi_join(sampling_units_panels, by = "polygon_id") %>%
+  semi_join(su_sf, by = "polygon_id") %>%
   anti_join(sampling_units_panels, by = "grts_ranking") %>%
   anti_join(sampling_units_panels, by = "grts_ranking_draw") %>%
   anti_join(no_habitat, by = "grts_ranking") %>%
@@ -881,10 +889,17 @@ vervangpunten <- grts_habmap %>%
   group_by(polygon_id, point_code_vervang) %>%
   mutate(rank_rel_buffer = ifelse(!is.na(point_code_vervang), rank(grts_ranking), NA)) %>%
   ungroup() %>%
-  select(polygon_id, point_code_vervang, grts_ranking, rank_rel_polygon, rank_rel_buffer, n_buffer, n_polygon)
+  select(polygon_id, point_code_vervang, grts_ranking, rank_rel_polygon, rank_rel_buffer, n_buffer, n_polygon) %>%
+  left_join(polygonen_point_code, by = "polygon_id") %>%
+  mutate(point_code_vervang = ifelse(is.na(point_code_vervang), point_code_inpolygon, point_code_vervang)) %>%
+  separate_rows(point_code_vervang, sep = ";") %>%
+  select(-point_code_inpolygon)
 
 
-
+check <- vervangpunten %>%
+  filter(is.na(rank_rel_buffer)) %>%
+  filter(str_detect(point_code_vervang, ";")) %>%
+  separate_rows(point_code_vervang, sep = ";")
 ```
 
 Hieronder een voorbeeld van een kleine polygoon: 
@@ -894,7 +909,7 @@ Hieronder een voorbeeld van een kleine polygoon:
 
 ```{r}
 
-p_id <- "412111_v2018"
+p_id <- "538098_v2018"
 
 polygon <- polygons_habitatmap %>%
   filter(polygon_id == p_id)%>%
@@ -907,7 +922,7 @@ sampling_unit <- su_sf %>%
 vervangpunten %>%
   filter(polygon_id == p_id) %>%
   st_transform(4326) %>%
-  mutate(show_color = ifelse(is.na(point_code_vervang), "blue", "yellow")) %>%
+  mutate(show_color = ifelse(is.na(rank_rel_buffer), "blue", "yellow")) %>%
   leaflet() %>%
   addTiles() %>%
   addCircleMarkers(data = sampling_unit, color = "red") %>%
@@ -919,7 +934,7 @@ Onderstaand voorbeeld toont overlappende buffers.
 
 ```{r}
 
-p_id <- "447541_v2014"
+p_id <- "013649_v2020"
 
 
 sd <- vervangpunten %>%
@@ -947,7 +962,7 @@ bscols(
       leaflet() %>%
       addTiles() %>%
       addPolygons(data = polygon ) %>%
-      addCircleMarkers(data = sampling_unit, color = "red", label = ~str_c(point_code, " - panel =", panel)) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
       addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
   )
 )
@@ -988,7 +1003,7 @@ bscols(
       leaflet() %>%
       addTiles() %>%
       addPolygons(data = polygon ) %>%
-      addCircleMarkers(data = sampling_unit, color = "red", label = ~str_c(point_code, " - panel =", panel)) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
       addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
   )
 )
@@ -1000,7 +1015,7 @@ bscols(
 
 # Resultaten wegschrijven
 
-```{r}
+```{r, eval= TRUE}
 sampling_units_panels <- selection_panels %>%
   filter(type != "2180") %>%
   select(point_code, legacy_site, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw,  measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord)
@@ -1014,9 +1029,14 @@ reserve <- selection %>%
   
 write.csv2(reserve, "../output/mhq_terr_reserve.csv")
 
+
+nieuwe_meetpunten <- sampling_units_panels %>%
+  filter(!measured_cycle1)
+
 vervangpunten_out <- vervangpunten %>%
   mutate(x_coord = st_coordinates(vervangpunten)[,1],
          y_coord = st_coordinates(vervangpunten)[,2]) %>%
+  filter(point_code_vervang %in% nieuwe_meetpunten$point_code) %>%
   arrange(polygon_id, point_code_vervang) %>%
   st_drop_geometry() %>%
   select(-n_buffer, - n_polygon)
