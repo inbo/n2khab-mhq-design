@@ -1,4 +1,4 @@
-# Scenario's meetnet habitatkwaliteit
+
 
 
 ```{r}
@@ -49,13 +49,19 @@ types_area_strata <- habmap_types %>%
   mutate(area_type = sum(area_subtype_sac),
             area_polygons = sum(area_polygons_subtype_sac),
             n_polygons = sum(n_polygons_subtype_sac),
-            prop_type = area_type/area_polygons) %>%
-  ungroup()
+            prop_type = area_type/area_polygons,
+            area_type_insac = sum(area_subtype_sac * (sac))
+          ) %>%
+  ungroup() %>%
+  mutate(prop_type_insac = area_type_insac/area_type)
 ```
 
 
 ```{r}
-calc_finitsamplesize_terrhab <- function(n_type_flanders = 80, n_type_sac = 170, n_subtype_flanders = 80, n_polygons_min = 15, area_min = 10, types_area_strata = types_area_strata, exclude_type = c("9110", "1130", "1140", "1310", "5130", "2110", "6120")) {
+
+exclude <- c("9110", "1130", "1140", "1310", "3270", "5130", "2110", "6120", "6430", "7150")
+
+calc_finitsamplesize_terrhab <- function(n_type_flanders = 80, n_type_sac = 170, n_subtype_flanders = 80, n_polygons_min = 15, area_min = 10, types_area_strata = types_area_strata, exclude_type = exclude) {
   
   types_samplesize_detailed <- types_area_strata %>%
   mutate(sample_type = (n_polygons > n_polygons_min) & (area_type > area_min) & (!main_type %in% exclude_type),
@@ -198,22 +204,6 @@ scenarios <- bind_rows(samplesize_original_forest_subtype,
 
 ```
 
-## Habitattypen waarvoor meetnet habitatkwaliteit bestaat
-
-We monitoren de habitatkwaliteit via een meetnet voor alle habitattypen, uitgezonderd:
-
-+ zeldzame habitattypen (habitattypen met een oppervlakte kleiner dan 10 ha of die op minder dan 15 locaties voorkomen)
-+ habitattype 6120 wordt ook als zeldzaam habitattype beschouwt (oppervlakte in de habitatkaart is een overschatting)
-+ habitattype 1130 (estuaria)
-+ habitattype 1140 (zandbanken)
-+ habitattype 1310 
-+ habitattype 5130
-+ habitattype 9110 (bostype dat enkel in de continentale regio voorkomt)
-
-We voeren een overbemonstering uit voor alle habitatsubtype, uitgezonderd
-
-+ habitatsubtypen met een oppervlakte kleiner dan 10 ha of die op minder dan 15 locaties voorkomen
-
 ```{r}
 samplesize_original_detailed <- bind_rows(samplesize_original_nonforest$samplesize_detailed,
                                           samplesize_original_forest$samplesize_detailed
@@ -231,7 +221,7 @@ subtype_names <- read_types() %>%
   select(subtype = type, subtype_name = type_shortname)
 
 meetnet_selection <- samplesize_original_detailed %>%
-  distinct(type, main_type, typelevel, sample_type, extra_subtype) %>%
+  distinct(type, main_type, typelevel, n_polygons, area_type, prop_type_insac, prop_type, sample_type, area_subtype, n_polygons_subtype, prop_subtype, extra_subtype) %>%
   left_join(main_types_names, by = "main_type") %>%
   mutate(sample_type = ifelse(sample_type, "ja", "nee"),
          extra_subtype = ifelse(extra_subtype, "ja", "nee")) %>%
@@ -242,22 +232,76 @@ meetnet_selection <- samplesize_original_detailed %>%
          extra_subtype = ifelse(typelevel == "subtype", extra_subtype, NA)) %>%
   filter(!(has_subtype & is.na(subtype))) %>%
   left_join(subtype_names, by = "subtype") %>%
-  select(typeclass_name, main_type, main_type_name, sample_type, subtype, subtype_name, extra_subtype)
+  mutate(area_type = round(area_type, 1),
+         area_subtype = round(area_subtype,1),
+         prop_type_insac = round(prop_type_insac, 2),
+         prop_type = round(prop_type, 2),
+         prop_subtype = round(prop_subtype, 3)) %>%
+  select(typeclass_name, main_type, main_type_name, sample_type, n_polygons, area_type, prop_type_insac, prop_type, subtype, subtype_name, area_subtype, n_polygons_subtype, prop_subtype, extra_subtype)
 
 ```
 
-Tabel \@ref(tab:tabschemes) geeft een overzicht van de habitattypen waarvoor een meetnet bestaat en de habitatsubtypen waarvoor een overbemonstering gebeurt. 
+# Aanwezige habitattpen in Vlaanderen
 
-```{r tabschemes}
+Tabel \@ref(tab:tabtypes) geeft een overzicht van de terrestrische habitattypen en habitatsubtypen die in Vlaanderen voorkomen. 
+
+```{r tabtypes}
 meetnet_selection %>%
-  select(habitattype = main_type_name, "code habitattype" = main_type, meetnet = sample_type, habitatsubtype = subtype_name, "code habitatsubtype" = subtype, "overbemonstering habitatsubtype" = extra_subtype) %>%
-  kable() %>%
+  select(habitattype = main_type_name, "code habitattype" = main_type, habitatsubtype = subtype_name, "code habitatsubtype" = subtype) %>%
+  kable(caption = "Habitattypen en subtypen in Vlaanderen") %>%
   kable_styling() %>%
   collapse_rows(c(1, 2, 3), target = 1)
 ```
 
+# Scenario's meetnet habitatkwaliteit
 
-Habitattype 7230 voldoet aan de criteria voor meetnet, maar nog niet operationeel. Hiervoor meetnet?
+## Habitattypen waarvoor meetnet habitatkwaliteit bestaat
+
+We monitoren de habitatkwaliteit via een meetnet voor alle habitattypen, uitgezonderd:
+
++ zeldzame habitattypen (habitattypen met een oppervlakte kleiner dan 10 ha of die op minder dan 15 locaties voorkomen)
++ habitattype 6120 wordt ook als zeldzaam habitattype beschouwt (oppervlakte in de habitatkaart is een overschatting)
++ habitattype 1130 (estuaria)
++ habitattype 1140 (zandbanken)
++ habitattype 1310 
++ habitattype 3270
++ habitattype 5130
++ habitattype 6430
++ habitattype 7150 
++ habitattype 9110 (bostype dat enkel in de continentale regio voorkomt)
+
+We voeren een overbemonstering uit voor alle habitatsubtype, uitgezonderd
+
++ habitatsubtypen met een oppervlakte kleiner dan 10 ha of die op minder dan 15 locaties voorkomen
+
+Tabel \@ref(tab:tabschemes) geeft een overzicht van de terrestrische habitattypen waarvoor we voor een meetnetaanpak kiezen. 
+
+```{r tabschemes}
+maintype_selection <- meetnet_selection %>%
+  mutate(reden = ifelse(main_type %in% exclude, "meetnet niet geschikt", 
+                        ifelse(sample_type == "nee", "zeer zeldzaam", ""))) %>%
+  select("code habitattype" = main_type, "oppervlakte (ha)" = area_type, "aandeel in sbz"  = prop_type_insac, "aantal polygonen habitatkaart" = n_polygons, "phab" = prop_type, meetnet = sample_type, "reden geen meetnet" = reden) %>%
+  unique()
+  
+maintype_selection %>%
+  kable(caption = "Keuze meetnetaanpak per hoofdtype") %>%
+  kable_styling()
+```
+
+Tabel \@ref(tab:tabschemes) geeft een overzicht van de terrestrische habitatsubtypen waarvoor we een overbemonstering uitvoeren. 
+
+```{r tabschemes2}
+subtype_selection <- meetnet_selection %>%
+  mutate(reden = ifelse(main_type %in% exclude, "meetnet niet geschikt", 
+                        ifelse(sample_type == "nee", "zeer zeldzaam", ""))) %>%
+  filter(str_detect(subtype, "_")) %>%
+  filter(sample_type == "ja") %>%
+  select("code habitatsubtype" = subtype, "oppervlakte (ha)" = area_subtype, "aantal polygonen habitatkaart" = n_polygons_subtype, "phab" = prop_subtype, "overbemonstering subtype" = extra_subtype) 
+  
+subtype_selection %>%
+  kable(caption = "Overbemonstering per habitatsubtype") %>%
+  kable_styling()
+```
 
 ## Steekproefgroottes terrestrische habitattypen voor verschillende scenario's
 
@@ -303,9 +347,8 @@ write_vc(samplesize_scenario3_detailed, root = "../output", file = "samplesize_m
 ```
 
 
-## Huidige meetinspanning
 
-```{r}
+```{r, eval = FALSE}
 
 mhq_refpoints <- read_vc("data/mhq_terr_refpoints_check_update", fileman_up("n2khab-sample-admin"))
 mhq_assessments <- read_vc("data/mhq_terr_assessments",  fileman_up("n2khab-sample-admin"))
@@ -354,7 +397,7 @@ mhq_progress_admin <- mhq_progress_details %>%
 ```
 
 
-```{r}
+```{r, eval = FALSE}
 mhq_visits <- mhq_progress_details %>%
   filter(assessment_source == "field assessment") %>%
   mutate(type_cat = ifelse(str_sub(type_target, 1, 1) == "9", "foresthab", "openhab"),
@@ -375,7 +418,7 @@ mhq_visits <- mhq_progress_details %>%
   ungroup()
 ```
 
-```{r}
+```{r, eval = FALSE}
 mhq_visits %>%
   gather(n_visits, n_measurements, key = "type", value = "aantal") %>%
   mutate(type = ifelse(type == "n_visits", "bezoeken",  "opnames")) %>%

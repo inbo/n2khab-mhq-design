@@ -130,7 +130,7 @@ ggplot() +
   labs(x = "Steekproefgrootte", y = "Aandeel habitat met slechte kwaliteit", linetype = expression(alpha)) +
   scale_y_continuous(labels = scales::percent) +
   scale_linetype_manual(values = c(2,3)) +
-  scale_colour_manual(values = c("gunstig" = inbo.groen, "ongunstig" = inbo.rood, "onbekend" = inbo.grijs)) 
+  scale_colour_manual(values = c("gunstig" = inbo_groen, "ongunstig" = inbo_rood, "onbekend" = inbo_grijs)) 
 
 ```
 
@@ -536,7 +536,7 @@ ggplot() +
   labs(linetype = expression(alpha),
        x = "Steekproefgrootte",
        y = "Detecteerbaar effetc (d)") +
-  scale_colour_manual(values = c("toename" = inbo.groen, "onbekend" = inbo.grijs, "afname" = inbo.rood))
+  scale_colour_manual(values = c("toename" = inbo_groen, "onbekend" = inbo_grijs, "afname" = inbo_rood))
 
   
 ```
@@ -651,7 +651,7 @@ ggplot() +
   labs(linetype = expression(alpha),
        x = "Steekproefgrootte",
        y = "Detecteerbaar effetc (d)") +
-  scale_colour_manual(values = c("toename" = inbo.groen, "onbekend" = inbo.grijs, "afname" = inbo.rood)) +
+  scale_colour_manual(values = c("toename" = inbo_groen, "onbekend" = inbo_grijs, "afname" = inbo_rood)) +
   xlim(-80, 200) +
   facet_wrap(~tekst_figuur, ncol = 2)
 

@@ -1,5 +1,3 @@
-
-
 ---
 title: "Evaluatie ontwerp meetnet habitatkwaliteit"
 # subtitle: "x"
@@ -33,8 +31,7 @@ output:
     toc_depth: 3
     latex_engine: xelatex
     number_sections: true
-    includes:
-        in_header: ../header.tex
+
 ---
 
 ```{r setup, include=FALSE}
@@ -49,10 +46,7 @@ options(stringsAsFactors = FALSE,
         scipen = 999, 
         digits = 15)
 
-
-library(plyr)
 library(sf)
-library(polylineSplitter)
 library(git2rdata)
 library(knitr)
 library(n2khab)
