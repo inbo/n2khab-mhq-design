@@ -779,7 +779,23 @@ n_panel %>%
   datatable(rownames = FALSE)
 ```
 
+# Selectie meetpunten afwerkingen 1ste meetcyclus voor 2180 en 2160 
 
+```{r}
+selectie_meetpunten_2180_2160 <- selection_scenarios %>%
+  filter(type %in% c("2160", "2180")) %>%
+  filter(!measured_cycle1) %>%
+  mutate(n_todo = ceiling(n_total_main_type - n_measured_valid)) %>%
+  group_by(main_type, sac) %>%
+  mutate(rank_rel = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  mutate(selected_main_type = rank_rel <= n_todo,
+         reserve_main_type = (rank_rel > n_todo) & (rank_rel <= n_todo + 5)) %>%
+  filter(selected_main_type | reserve_main_type) %>%
+  select(point_code, legacy_site, main_type, type, phab, polygon_id, sac, grts_ranking, grts_ranking_draw, selected_main_type, reserve_main_type,  x_coord, y_coord, n_todo) %>%
+  arrange(type, sac, grts_ranking_draw)
+
+```
 
 
 # Selectie vervangpunten
@@ -788,7 +804,7 @@ Wanneer een meetpunt niet geschikt blijkt, moet dit meetpunt vervangen worden do
 
 Als potentiële vervangpunten selecteren we alle steekproefeenheden in een vierkante buffer van 7 x 7 gridcellen rond het meetpunt die binnen dezelfde habitatpolygoon gelegen zijn. 
 
-Voor kleine polygonen zal dit maar een beperkt aantal vervangpunten opleveren. Daarom selecteren we voor polygonen met minder dan 50 steekproefeenheden en minder dan 10 seteekproefeenheden in de vierante buffer, alle steekproefeenheden als bijkomende potentiële vervangpunten. 
+Voor kleine polygonen zal dit maar een beperkt aantal vervangpunten opleveren. Daarom selecteren we voor polygonen met minder dan 50 steekproefeenheden en minder dan 10 steekproefeenheden in de vierante buffer, alle steekproefeenheden als bijkomende potentiële vervangpunten. 
 
 Elk vervangpunt krijgt een rangnummer overeenkomstig de relatieve rangschikking:
 
@@ -855,6 +871,7 @@ for(i in 1:nrow(su_sf)) {
 
 st_crs(buffers) <- 31370
 
+
 # buffers_all <- buffers %>%
 #   mutate(buffer = "ja") %>%
 #   group_by(buffer) %>%
@@ -879,10 +896,11 @@ vervangpunten <- grts_habmap %>%
   ungroup() %>%
   st_as_sf(coords= c("x", "y"), crs = 31370) %>%
   st_join(buffers) %>%
+  filter((polygon_id == polygon_id_vervang) | is.na(polygon_id_vervang)) %>%
   group_by(polygon_id) %>%
   mutate(n_buffer = sum(!is.na(polygon_id_vervang))) %>%
   ungroup() %>%
-  filter((polygon_id == polygon_id_vervang) | (n_buffer <= 10 & n_polygon < 50) ) %>%
+  filter((!is.na(polygon_id_vervang)) | (n_buffer <= 10 & n_polygon < 50) ) %>%
   group_by(polygon_id) %>%
   mutate(rank_rel_polygon = rank(grts_ranking, ties.method = "min")) %>%
   ungroup() %>%
@@ -1012,6 +1030,44 @@ bscols(
 ```
 
 
+```{r}
+
+p_id <- c("638515_v2014", "638283_v2014")
+
+
+sd <- vervangpunten %>%
+  filter(polygon_id %in% p_id) %>%
+  st_transform(4326) 
+
+sd <- SharedData$new(sd)
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id %in% p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id %in% p_id) %>%
+  st_transform(4326) 
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+    sd %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = polygon ) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
+      addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+  )
+)
+  
+  
+```
+
 
 # Resultaten wegschrijven
 
@@ -1030,7 +1086,7 @@ reserve <- selection %>%
 write.csv2(reserve, "../output/mhq_terr_reserve.csv")
 
 
-nieuwe_meetpunten <- sampling_units_panels %>%
+nieuwe_meetpunten <- selection_panels %>%
   filter(!measured_cycle1)
 
 vervangpunten_out <- vervangpunten %>%
@@ -1167,18 +1223,89 @@ reserve_inbo %>%
 
 
 
+## INBO: duinen
+
+### Meetcyclus 2 voor 2120, 2130, 2170 en 2190
+
++ lijst meetpunten: 'mhq_terr_cyclus2_duinen_inbo.csv'
+
+```{r}
+sampling_units_panels_duinen_inbo <- sampling_units_panels %>%
+  filter(str_sub(main_type, 1, 2) == "21") %>%
+  filter(! main_type %in% c("2180", "2190")) %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt", "nieuw meetpunt"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  arrange(panel, grts_ranking_draw)
+
+write_csv2(sampling_units_panels_duinen_inbo, "../output/mhq_terr_cyclus2_duinen_inbo.csv", na = "")
+
+sampling_units_panels_duinen_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
 
 
+```
 
 
+### Afwerking meetcyclus 2 voor 2160 en 2180
 
 
+```{r}
+selectie_duinen_2180_2160 <- selectie_meetpunten_2180_2160 %>%
+  mutate(type_meetpunt = ifelse(selected_main_type, "selectie", "reserve"),
+         pink_pq = ifelse(legacy_site, "ja", "nee"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(type_meetpunt, pink_pq, point_code, polygon_id, grts_ranking_draw, sbz = sac, habitattype = type, phab, x, y, n_todo) %>%
+  arrange(habitattype, sbz, grts_ranking_draw)
+
+write_csv2(selectie_duinen_2180_2160, "../output/mhq_terr_cyclus1_2160_2180_inbo.csv", na = "")
+
+```
 
 
+### Vervangpunten
 
++ vervangpunten: 'mhq_terr_vervangpunten_duinen_inbo.csv'
 
+```{r}
+vervangpunten_duinen_inbo1 <- vervangpunten_out %>%
+  semi_join(sampling_units_panels_duinen_inbo, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
 
+vervangpunten_duinen_inbo2 <- vervangpunten_out %>%
+  semi_join(selectie_duinen_2180_2160, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
 
+vervangpunten_duinen_inbo <- bind_rows(vervangpunten_duinen_inbo1,
+                                        vervangpunten_duinen_inbo2) %>%
+  unique()
+
+check <- vervangpunten_duinen_inbo %>%
+  group_by(point_code_vervang, rank_rel_buffer, rank_rel_polygon) %>%
+  filter(n() > 1)
+
+check2 <- selectie_duinen_2180_2160 %>%
+ # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+  filter(! point_code %in% vervangpunten_duinen_inbo$point_code_vervang)
+
+check3 <- selectie_duinen_2180_2160 %>%
+ # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+  filter(grts_ranking_draw %in% vervangpunten_duinen_inbo$grts_ranking_draw)
+
+write_csv2(vervangpunten_duinen_inbo, "../output/mhq_terr_vervangpunten_duinen_inbo.csv", na = "")
+
+vervangpunten_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
 
 
 
