@@ -9,7 +9,7 @@ In dit document evalueren we de voortgang van het meetnet habitatkwaliteit voor 
 - meetpuntadministratie (origineel bestand = 'Monitoring3260_SVZ2020_VrToonWestra.xlsx'). See this [Google Drive folder](https://drive.google.com/drive/folders/14N1ObhUjKfvmjJcZSQ2vKtpuWA8PSiK7).
 
 ```{r}
-admin_orig <- read.csv2("../data/adminstreams/Monitoring3260_SVZ2021_VrToonWestra.csv", stringsAsFactors = FALSE)
+admin_orig <- read_csv2("../data/adminstreams/Monitoring3260_SVZ2021_VrToonWestra.csv")
 ```
 
 - steekproefkader afgeleid uit habitatkaart versie 1.7
@@ -60,12 +60,12 @@ sample_size_3260_v2021 %>%
 ```{r}
 admin <- admin_orig %>%
   mutate(#sampling_unit_code = str_c("1_4_", IDToonW),
-         assessment_year = jaar.monitoring,
-         assessment_date = as.Date(datum.veldbezoek, format = "%d/%m/%Y"),
+         assessment_year = `jaar monitoring`,
+         assessment_date = as.Date(`datum veldbezoek`, format = "%d/%m/%Y"),
          sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
                       ifelse(SBZ == 0, "outside", SBZ)),
          type_observed = doelhabitat) %>%
-  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = reden.geen.bemonstering, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
+  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = `reden geen bemonstering`, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
 ```
 
 Er wordt gebruik gemaakt van onderstaande klassen:
