@@ -1,6 +1,6 @@
 {
   "R": {
-    "Version": "4.1.1",
+    "Version": "4.2.0",
     "Repositories": [
       {
         "Name": "RStudio",
@@ -117,6 +117,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "10d231579bc9c06ab1c320618808d4ff"
+    },
+    "bookdown": {
+      "Package": "bookdown",
+      "Version": "0.26",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "65ebdc552e88fc98c596f4797c5415ad"
     },
     "broom": {
       "Package": "broom",
@@ -552,6 +559,18 @@
       "Repository": "CRAN",
       "Hash": "6dfe8bf774944bd5595785e3229d8771"
     },
+    "n2khab": {
+      "Package": "n2khab",
+      "Version": "0.6.0",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteRepo": "n2khab",
+      "RemoteUsername": "inbo",
+      "RemoteRef": "HEAD",
+      "RemoteSha": "14413b31976664ea5dbc1ac36b71dd39a839ad80",
+      "Hash": "a3c1bd092f1704766468695d4fbe6f2d"
+    },
     "nlme": {
       "Package": "nlme",
       "Version": "3.1-153",
@@ -579,6 +598,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "01f28d4278f15c76cddbea05899c5d6f"
+    },
+    "plyr": {
+      "Package": "plyr",
+      "Version": "1.8.7",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "9c17c6ee41639ebdc1d7266546d3b627"
     },
     "png": {
       "Package": "png",
@@ -698,6 +724,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "31b60a882fabfabf6785b8599ffeb8ba"
+    },
+    "rprojroot": {
+      "Package": "rprojroot",
+      "Version": "2.0.3",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "1de7ab598047a87bba48434ba35d497d"
     },
     "rstudioapi": {
       "Package": "rstudioapi",
