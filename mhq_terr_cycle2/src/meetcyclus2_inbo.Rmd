@@ -52,6 +52,11 @@ nieuwe_punten_inbo <- su_inbo %>%
   st_as_sf(coords =c("x", "y"), crs = 31370) %>%
   st_transform(4326)
 
+vervangpunten_inbo <- vervangpunten_inbo %>%
+  filter(point_code_vervang %in% nieuwe_punten_inbo$point_code) %>%
+  st_as_sf(coords =c("x", "y"), crs = 31370) %>%
+  st_transform(4326)
+
 habmap_terr <- read_habitatmap_terr()
 
 polygonen <- habmap_terr$habitatmap_terr_polygons %>%
@@ -74,22 +79,23 @@ bscols(
       ),
       sd %>%
       leaflet() %>%
-        addTiles() %>%
+        addTiles(group = "OSM") %>%
+        addProviderTiles(providers$Esri.WorldImagery, group = "Orthofoto") %>%
         addPolygons(data = polygonen, label = ~polygon_id, group = "Polygonen Habitatkaart") %>%
         addCircleMarkers(data= nieuwe_punten_inbo, color = "red", popup = ~str_c(habitattype, "-", point_code), label = ~str_c(habitattype, "-", point_code)) %>%
         addCircleMarkers(label = ~ ifelse(!is.na(rank_rel_buffer), rank_rel_buffer, str_c(rank_rel_polygon)),
                          color = ~ifelse(!is.na(rank_rel_buffer), "yellow", "blue"),
                          labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE),
                          group = "Vervangpunten") %>%
-        addSearchFeatures(
-          targetGroups = "Polygonen Habitatkaart", # group should match addMarkers() group
-          options = searchFeaturesOptions(
-            zoom=16, openPopup = TRUE, firstTipSubmit = TRUE,
-            autoCollapse = TRUE, hideMarkerOnCollapse = TRUE
-          )) %>%
+        # addSearchFeatures(
+        #   targetGroups = "Polygonen Habitatkaart", # group should match addMarkers() group
+        #   options = searchFeaturesOptions(
+        #     zoom=16, openPopup = TRUE, firstTipSubmit = TRUE,
+        #     autoCollapse = TRUE, hideMarkerOnCollapse = TRUE
+        #   )) %>%
         addResetMapButton() %>%
-        addLayersControl(overlayGroups = c("Polygonen Habitatkaart", "Vervangpunten"),
-                         options = layersControlOptions(collapsed = FALSE)) %>%
+        addLayersControl(baseGroups = c("OSM", "Orthofoto"),
+                         options = layersControlOptions(collapsed = TRUE)) %>%
         addEasyButton(easyButton(
           icon="fa-crosshairs", title="Locate Me",
           onClick = JS("function(btn, map){ map.locate({setView: true}); }"))) %>%
@@ -102,45 +108,4 @@ bscols(
 
 ```
 
-
-# Soortenlijsten opnames eerste meetcyclus
-
-Onderstaande tabel bevat de soortenlijsten van de opnames uitgevoerd in de eerste meetcyclus.
-
-Je kan een meetpunt selecteren via de meetpunt code of de INBOVEG user reference.
-
-```{r}
-
-data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr_v2021")
-
-mhq_terr_measurements_inbo <- read_vc("mhq_terr_measurements", data_path) %>%
-  filter(fieldwork_team == "inbo")
-
-data_path <- file.path(fileman_up("n2khab-mhq-data"), "processed/inboveg_mhq_terr")
-
-soortenlijst <- read_vc("vegetation_mhq_terr", data_path)
-
-tabel <- mhq_terr_measurements_inbo %>%
-  separate(recording_givid, into = c("recording_givid_circle", "recording_givid_square"), sep = ";") %>%
-  mutate(recording_givid = str_remove(recording_givid_square, "square: "),
-         recording_givid = str_trim(recording_givid)) %>%
-  left_join(soortenlijst, by = "recording_givid") %>%
-  distinct(point_code, recording_givid, user_reference, type, measurement_date, name_scientific) %>%
-  select("Code meetpunt" = point_code, "User reference" = user_reference,  Habitattype = type, "Datum opname" = measurement_date, "Wetenschappelijke naam" = name_scientific)
-
-check <- tabel %>%
-  filter(is.na(`Wetenschappelijke naam`))
-```
-
-```{r}
-
-tabel %>%
-  datatable(rownames = FALSE,
-            filter = 'top', 
-            options = list(pageLength = 25,
-                           buttons = c('copy', 'csv', 'excel'))
-  )
-
-
-```
 
