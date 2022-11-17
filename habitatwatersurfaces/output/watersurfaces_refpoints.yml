@@ -1,0 +1,17 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  sorting: polygon_id
+  hash: 10589f602c9fbf4db8dc97418f54e9b87de37f31
+  data_hash: 2065b5f4f9afd573e2bfeae012aa21c718e42a81
+polygon_id:
+  class: character
+grts_ranking:
+  class: numeric
+in_object:
+  class: logical
+x:
+  class: numeric
+'y':
+  class: numeric
