@@ -13,7 +13,7 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
-
+#devtools::install_github("tlhenvironment/buffeRs")
 library(tidyverse)
 library(git2rdata)
 library(kableExtra)
@@ -60,7 +60,7 @@ samplesize_main_type %>%
 # Opnames eerste cyclus
 
 ```{r}
-data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr_v2021")
+data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr_v2023")
 
 mhq_terr_measurements <- read_vc("mhq_terr_measurements", data_path)
 
@@ -83,6 +83,11 @@ measurements_cycle1 <- mhq_terr_measurements %>%
   pivot_wider(names_from = "valid_sampling_unit",
               values_from = n_measured, values_fill = 0) %>%
   mutate(n_measured = valid + not_valid + unknown) 
+
+check  <- mhq_terr_measurements %>%
+  group_by(grts_ranking_draw, type) %>%
+  filter(n() > 1) %>%
+  ungroup()
 
 progress <- samplesize_type %>%
   mutate(n_total_type = ceiling(n_total_type)) %>%
@@ -227,15 +232,23 @@ sampleframe <- sampleframe_orig %>%
                                select_prob),
           selection_step1 = (select_prob < phab/100) | is.na(phab))
 
-check <- sampleframe %>%
+check_double_grts_ranking_draw <- sampleframe %>%
   filter(!is.na(grts_ranking_draw)) %>%
   group_by(grts_ranking_draw, type) %>%
   filter(n() > 1) %>%
-  filter(str_sub(type, 1, 1 ) != "9")
+  filter(str_sub(type, 1, 1 ) != "9") %>%
+  filter(str_sub(type, 1, 4 ) != "6510") %>%
+  filter(str_sub(type, 1, 4 ) != "2330")
+
+#NOG NAKIJKEN!!
+remove_point_code <- check_double_grts_ranking_draw %>%
+  filter(is.na(measurement_date))
 
 #NOG NAKIJKEN!!
 sampleframe <- sampleframe %>%
-  filter(!(point_code %in% c("169137_2", "979286_1", "1676465_2", "3276198_1", "3424742_1")))
+  filter(!(point_code %in% c("169137_2", "979286_1", "1676465_2", "3276198_1", "3424742_1"))) %>%
+  anti_join(remove, by = "point_code") %>%
+  unique()
 
 
 check <- sampleframe %>%
@@ -768,14 +781,15 @@ selection_panels <- create_panels(sampling_units = selection_planning)
     
   
 sampling_units_panels <- selection_panels %>%
-  select(point_code, legacy_site, main_type, type, phab, polygon_id, sac, grts_ranking, grts_ranking_draw, measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord) 
+  select(point_code, legacy_site, main_type, type, phab, polygon_id, sac, grts_ranking, grts_ranking_draw, measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord) %>%
+  left_join(select(mhq_terr_measurements, point_code, measurement_date, point_code, type, db_ref, recording_givid), by = c("point_code", "measurement_date", "type"))
 ```
 
 Onderstaande tabel geeft de verdeling van de meetpunten weer over de verschillende panels en het minimum en maximum verschil in jaren t.o.v. opeenvolgende metingen.
 
 ```{r}
 n_panel %>%
-  filter(!main_type %in% c("2160", "2180")) %>%
+ # filter(!main_type %in% c("2160", "2180")) %>%
   datatable(rownames = FALSE)
 ```
 
@@ -1072,14 +1086,12 @@ bscols(
 # Resultaten wegschrijven
 
 ```{r, eval= TRUE}
-sampling_units_panels <- selection_panels %>%
-  filter(type != "2180") %>%
-  select(point_code, legacy_site, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw,  measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord)
+# sampling_units_panels <- selection_panels %>%
+#   select(point_code, legacy_site, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw,  measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord)
 
 write.csv2(sampling_units_panels, "../output/mhq_terr_cycle2.csv")
 
 reserve <- selection %>%
-  filter(type != "2180") %>%
   filter(point_status != "selected_cycle2") %>%
   select(point_status, legacy_site, point_code, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw, measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, rank_rel_main_type = rank_rel_main_type_sc2, rank_rel_subtype = rank_rel_subtype_sc2, x_coord, y_coord)
   
@@ -1173,7 +1185,7 @@ sampling_units_panels_inbo <- sampling_units_panels %>%
          uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
          x = round(x_coord, 2),
          y = round(y_coord, 2)) %>%
-  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y, db_ref, recording_givid) %>%
   arrange(panel, grts_ranking_draw)
 
 write_csv2(sampling_units_panels_inbo, "../output/mhq_terr_cyclus2_inbo.csv", na = "")
@@ -1225,19 +1237,18 @@ reserve_inbo %>%
 
 ## INBO: duinen
 
-### Meetcyclus 2 voor 2120, 2130, 2170 en 2190
+### Meetcyclus 2 
 
 + lijst meetpunten: 'mhq_terr_cyclus2_duinen_inbo.csv'
 
 ```{r}
 sampling_units_panels_duinen_inbo <- sampling_units_panels %>%
   filter(str_sub(main_type, 1, 2) == "21") %>%
-  filter(! main_type %in% c("2180", "2190")) %>%
   mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt", "nieuw meetpunt"),
          uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
          x = round(x_coord, 2),
          y = round(y_coord, 2)) %>%
-  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y, db_ref, recording_givid) %>%
   arrange(panel, grts_ranking_draw)
 
 write_csv2(sampling_units_panels_duinen_inbo, "../output/mhq_terr_cyclus2_duinen_inbo.csv", na = "")
@@ -1253,7 +1264,7 @@ sampling_units_panels_duinen_inbo %>%
 ### Afwerking meetcyclus 2 voor 2160 en 2180
 
 
-```{r}
+```{r, eval = FALSE}
 selectie_duinen_2180_2160 <- selectie_meetpunten_2180_2160 %>%
   mutate(type_meetpunt = ifelse(selected_main_type, "selectie", "reserve"),
          pink_pq = ifelse(legacy_site, "ja", "nee"),
@@ -1272,33 +1283,33 @@ write_csv2(selectie_duinen_2180_2160, "../output/mhq_terr_cyclus1_2160_2180_inbo
 + vervangpunten: 'mhq_terr_vervangpunten_duinen_inbo.csv'
 
 ```{r}
-vervangpunten_duinen_inbo1 <- vervangpunten_out %>%
+vervangpunten_duinen_inbo <- vervangpunten_out %>%
   semi_join(sampling_units_panels_duinen_inbo, by = "polygon_id") %>%
   mutate(x = round(x_coord, 2),
          y = round(y_coord, 2)) %>%
   select(-x_coord, -y_coord)
 
-vervangpunten_duinen_inbo2 <- vervangpunten_out %>%
-  semi_join(selectie_duinen_2180_2160, by = "polygon_id") %>%
-  mutate(x = round(x_coord, 2),
-         y = round(y_coord, 2)) %>%
-  select(-x_coord, -y_coord)
-
-vervangpunten_duinen_inbo <- bind_rows(vervangpunten_duinen_inbo1,
-                                        vervangpunten_duinen_inbo2) %>%
-  unique()
+# vervangpunten_duinen_inbo2 <- vervangpunten_out %>%
+#   semi_join(selectie_duinen_2180_2160, by = "polygon_id") %>%
+#   mutate(x = round(x_coord, 2),
+#          y = round(y_coord, 2)) %>%
+#   select(-x_coord, -y_coord)
+# 
+# vervangpunten_duinen_inbo <- bind_rows(vervangpunten_duinen_inbo1,
+#                                         vervangpunten_duinen_inbo2) %>%
+#   unique()
 
 check <- vervangpunten_duinen_inbo %>%
   group_by(point_code_vervang, rank_rel_buffer, rank_rel_polygon) %>%
   filter(n() > 1)
 
-check2 <- selectie_duinen_2180_2160 %>%
- # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
-  filter(! point_code %in% vervangpunten_duinen_inbo$point_code_vervang)
-
-check3 <- selectie_duinen_2180_2160 %>%
- # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
-  filter(grts_ranking_draw %in% vervangpunten_duinen_inbo$grts_ranking_draw)
+# check2 <- selectie_duinen_2180_2160 %>%
+#  # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+#   filter(! point_code %in% vervangpunten_duinen_inbo$point_code_vervang)
+# 
+# check3 <- selectie_duinen_2180_2160 %>%
+#  # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+#   filter(grts_ranking_draw %in% vervangpunten_duinen_inbo$grts_ranking_draw)
 
 write_csv2(vervangpunten_duinen_inbo, "../output/mhq_terr_vervangpunten_duinen_inbo.csv", na = "")
 
