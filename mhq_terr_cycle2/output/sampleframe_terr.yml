@@ -1,0 +1,54 @@
+..generic:
+  git2rdata: 0.4.0
+  optimize: yes
+  NA string: NA
+  sorting:
+  - point_code
+  - type
+  hash: 90b804b815899d36ba902510001237bf2c334b15
+  data_hash: 357fd647e6ab1a9c733fd529bd3ec1e94b4ce91f
+point_code:
+  class: character
+grts_ranking:
+  class: numeric
+grts_ranking_draw:
+  class: numeric
+sac:
+  class: numeric
+legacy_site:
+  class: logical
+type:
+  class: character
+polygon_id:
+  class: character
+phab:
+  class: integer
+source:
+  class: character
+is_centroid:
+  class: logical
+measurement_date:
+  class: Date
+  origin: '1970-01-01'
+valid_sampling_unit:
+  class: logical
+valid_refpoint:
+  class: logical
+valid_type:
+  class: logical
+x_coord:
+  class: numeric
+y_coord:
+  class: numeric
+select_prob:
+  class: numeric
+measured_valid_cycle1:
+  class: logical
+measured_cycle1:
+  class: logical
+selection_step1:
+  class: logical
+source_bwk:
+  class: character
+jaar_kartering:
+  class: numeric
