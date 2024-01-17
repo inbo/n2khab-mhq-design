@@ -6,6 +6,5 @@
 *.html
 *.md
 *.zip
-output/
 src/_bookdown_files/
 
