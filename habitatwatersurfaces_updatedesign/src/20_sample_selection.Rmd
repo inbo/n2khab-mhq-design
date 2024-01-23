@@ -1,0 +1,285 @@
+# Sample selection
+
+We select sampling units from the table `mhq_watersurfaces_populationunits`.
+The selection is based on the value `grts_ranking_draw`.
+
+We also check how many of the selected sampling units have already been measured in the first monitoring cycle and how many of the measured populations are not selected.
+
+
+
+```{r}
+
+root_samplingframe <- "../../habitatwatersurfaces/output" 
+
+watersurfaces_populationunits <- read_vc(root = root_samplingframe, file = "mhq_watersurfaces_populationunits")
+
+assessments <- read_vc(root = root_samplingframe, file = "mhq_watersurfaces_assessments")
+
+measurements <- read_vc(root = root_samplingframe, file = "mhq_watersurfaces_measurements")
+
+measurements_summary <- measurements %>%
+  filter(!is.na(type)) %>%
+  group_by(polygon_id, type) %>%
+  summarise(measurement_type = str_c(measurement_type, collapse = " + ")) %>%
+  ungroup()
+
+
+check <- read_watersurfaces_hab()
+check <- check$watersurfaces_types
+```
+
+
+```{r}
+strata <- watersurfaces_types_2021 %>%
+  distinct(polygon_id, area_class, sac) 
+
+strata_watersurfaces_extra <- read_watersurfaces() %>%
+  filter(polygon_id %in% assessments$polygon_id) %>%
+  filter(! polygon_id %in% strata$polygon_id) %>%
+  mutate(area_ha = drop_units(st_area(geom))/10000,
+         area_polygon_ha = area_ha,
+         area_class = ifelse(area_ha <= 1, "Opp <= 1 ha",
+                             ifelse(area_ha <= 5, "1 ha < Opp <= 5 ha",
+                                    ifelse(area_ha < 50, "5 ha < Opp < 50 ha", ">= 50 ha"))),
+         area_class = factor(area_class, levels = c("Opp <= 1 ha", "1 ha < Opp <= 5 ha", "5 ha < Opp < 50 ha", ">= 50 ha"))) %>%
+  st_join(sac_sf) %>%
+  mutate(sac = !is.na(sac_name)) %>%
+  st_drop_geometry() %>%
+  distinct(polygon_id, area_class, sac)
+
+strata <- bind_rows(strata,
+                    strata_watersurfaces_extra)
+
+populationunits_details <- watersurfaces_populationunits %>%
+  left_join(strata, by = "polygon_id") %>%
+  left_join(measurements_summary, by = c("polygon_id", "type")) %>%
+  mutate(measured_cycle1 = !is.na(measurement_type)) %>%
+  mutate(main_type = str_sub(type, 1, 4),
+         type = ifelse(type == "3130", "3130_aom", as.character(type)))
+
+# rank_main_type <- populationunits_details %>%
+#   distinct(polygon_id, main_type, sac, area_class, grts_ranking_draw) %>%
+#   group_by(main_type, sac, area_class) %>%
+#   mutate(rank_main_type = rank(grts_ranking_draw)) %>%
+#   ungroup() %>%
+#   select(polygon_id, main_type, rank_main_type)
+# 
+# populationunits_details <- populationunits_details %>%
+#   left_join(rank_main_type, by = c("polygon_id", "main_type"))
+
+```
+
+```{r}
+samplesize_main_type <- samplesize_alt %>%
+  filter(version == "watersurfaces_hab_2021") %>%
+  distinct( main_type, sac, area_class, samplesize_main_type_alt1) %>%
+  mutate(samplesize_main_type_alt1 = round(samplesize_main_type_alt1))
+
+samplesize_subtype <- samplesize_alt %>%
+  filter(version == "watersurfaces_hab_2021") %>%
+  distinct(type, sac, area_class, samplesize_subtype_alt1) %>%
+  mutate(samplesize_subtype_alt1 = round(samplesize_subtype_alt1)) %>%
+  filter(!is.na(samplesize_subtype_alt1))
+
+samplesize_type_total <- samplesize_alt %>%
+  filter(version == "watersurfaces_hab_2021") %>%
+  distinct(type, sac, area_class, samplesize_total_alt1) %>%
+  mutate(samplesize_total_alt1 = round(samplesize_total_alt1))
+
+selection_type <- populationunits_details %>%
+  left_join(samplesize_type_total, by = c("type", "sac", "area_class")) %>%
+  # left_join(samplesize_main_type, by = c("main_type", "sac", "area_class")) %>%
+  # left_join(samplesize_subtype, by = c("type", "sac", "area_class")) %>%
+   group_by(type, sac, area_class) %>%
+  mutate(rank_subtype = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  mutate(selected = rank_subtype <= samplesize_total_alt1,
+         reserve = (!selected) & (rank_subtype <= samplesize_total_alt1 + 10)) %>%
+  group_by(polygon_id) %>%
+  mutate(type_all = str_c(type, collapse = " + ")) %>%
+  ungroup()
+  # group_by(type, sac, area_class) %>%
+  # mutate(n_selected_type = sum(selected),
+  #        rank_subtype = rank(grts_ranking_draw)) %>%
+  # ungroup() %>%
+  # mutate(n_extra_subtype = pmax(0, samplesize_subtype_alt1 -n_selected_type)) %>%
+  # mutate(selected_extra = (rank_subtype > n_selected_type) & (rank_subtype <= (n_selected_type + n_extra_subtype)),
+  #        selected = ifelse(selected, TRUE,
+  #                          ifelse(selected_extra & !is.na(selected_extra), TRUE, 
+  #                                 FALSE)))
+
+selection_type_overview <- selection_type %>%
+  group_by(main_type, type, sac, area_class, selected, measured_cycle1) %>%
+  summarise(n = n_distinct(polygon_id)) %>%
+  ungroup() %>%
+  mutate(names = ifelse(selected,
+                      ifelse(measured_cycle1, "selected_measured", "selected_notmeasured"),
+                      ifelse(measured_cycle1, "notselected_measured", "notselected_notmeasured"))) %>%
+  select(-selected, -measured_cycle1) %>%
+  pivot_wider(names_from = names, values_from = n, values_fill = 0) %>%
+  mutate(selected_total = selected_measured + selected_notmeasured,
+         total = selected_total + notselected_measured + notselected_notmeasured,
+         total_measured = selected_measured + notselected_measured) %>%
+  left_join(samplesize_type_total, by = c("type", "sac", "area_class")) 
+```
+
+Table \@ref(tab:resultalt1) shows the results per type, area_class and sac for sample size alternative 1 with n_sac = 80:
++ the number of selected sampling units 
++ the number of selected sampling units that haven been measured (the first number within parentheses)
++ the number of population units (selected and not selected) that haven been measured (the second number within parentheses)
+
+
+
+```{r resultalt1}
+selection_type_overview %>%
+  mutate(show_n = str_c( selected_total, " (", selected_measured, "/", total_measured, ")")) %>%
+  select(type, sac, area_class, show_n) %>%
+  pivot_wider(names_from = area_class, values_from = show_n, values_fill = "0") %>%
+  kable(caption = "Sample size for altenative 1 with n_sac = 80 (number of selected sampling units that have been measured in the first monitoring cycle/ total number of measured watersurfaces in the first monitoring cycle)") %>%
+  kable_styling()
+
+```
+
+
+```{r}
+watersurfaces_sample <- watersurfaces_area_sf %>%
+  select(polygon_id, sac, area_class) %>%
+  st_centroid() %>%
+  left_join(select(selection_type, main_type, type, type_all, polygon_id, selected, measured_cycle1, grts_ranking, grts_ranking_draw), by = "polygon_id") %>%
+  filter(selected)
+
+flanders <- read_admin_areas(dsn = "flanders")
+
+plot1 <- ggplot() +
+  geom_sf(data = flanders, fill = "white") +
+  geom_sf(data = watersurfaces_sample, aes(colour = area_class), alpha = 0.6) +
+  labs(colour = "Oppervlakteklasse") +
+  theme(legend.text = element_text(size = 30),
+        legend.title = element_text(size = 30))
+
+
+ggsave(filename = "../output/steekproef_watervlakken.png", plot = plot1, width = 8, height = 3)
+
+```
+
+
+
+
+```{r}
+
+watersurfaces_show <- watersurfaces_area_sf %>%
+  select(polygon_id, sac, area_class) %>%
+  st_centroid() %>%
+  left_join(select(selection_type, main_type, type, type_all, polygon_id, selected, measured_cycle1, grts_ranking, grts_ranking_draw)) %>%
+  st_transform(crs = 4326) %>%
+  mutate(color_fill_show = ifelse(selected, "blue", "red"),
+         color_stroke_show = ifelse(measured_cycle1, "yellow", "grey"),
+         label_show = str_c("id: ",polygon_id, 
+                            "; type: ", type_all,
+                            "; sac: ", sac,
+                            "; area_class: ", area_class),
+         type = as.character(type))
+  
+```
+
+The map below gives an overview of the sample selection:
+
++ selected sampling units (blue circles)
++ population units that have not been selected (red circles)
++ population units that have been measured in the first monitoring cycle (circle with yellow line)
++ population units that have not been measured in the first monitoring cycle (circle with grey line)
+
+By clicking on a circle marker in the map you can see the polygon_id, type, area_class and sac.
+
+```{r}
+
+sd <- SharedData$new(watersurfaces_show)
+
+bscols(filter_select("type", "Select habitat type", sharedData = sd, ~type, allLevels = FALSE),
+       filter_select("area_class", "Area class", sharedData = sd, ~area_class, allLevels = FALSE),
+        filter_checkbox("sac", "Within sac", sharedData = sd, ~sac)
+       )
+
+bscols(filter_checkbox("measured_cycle1", "Measured in cycle 1", sharedData = sd, ~measured_cycle1),
+       filter_checkbox("selected", "Selected sampling unit", sharedData = sd, ~selected)
+       )
+
+bscols(widths = c(8, 4),
+        leaflet(sd) %>%
+        addTiles() %>%
+        addCircleMarkers(fillColor = ~color_fill_show, color =  ~color_stroke_show, fillOpacity = 0.4, opacity = 0.7,
+                         popup = ~label_show),
+       plot_ly(sd, x = ~measured_cycle1) %>%
+        add_histogram(color = ~selected,
+                      colors = c("red", "blue")) %>%
+        layout(barmode = "stack",
+               legend=list(title=list(text='<b> Selected sampling unit </b>'))) %>%
+      layout(legend = list(x = 200, y = 0.5))
+)
+
+
+
+
+```
+
+# Include more sampling units that were measured in the first monitoring cycle?
+
+It could be an option to include in the sample more watersurfaces that have been measured in the first monitoring cycle.
+
+Advantages are:
+
++ more paired observations and therefore a higher precision for trend estimates
++ the sample contains more watersurfaces that have already been visited and therefore the presence of the target type is known (with high probability)
+
+The disadvantage is that:
+
++ the sample is less representative for the current distribution of the habitat types and there fore estimates of status and trend could be biased (and since there is a large difference between the original sampling frame and the current one, this bias could be significant)
+
+```{r}
+check_measurements <- populationunits_details %>%
+  filter(str_detect(source, pattern = "original sample frame|assessments monitoring cycle 1")) %>%
+  group_by(type, sac, area_class) %>%
+  mutate(rank_type = rank(grts_ranking_draw),
+         n_measured = sum(measured_cycle1)) %>%
+  ungroup() %>%
+  mutate(selection_correct = rank_type <= n_measured) %>%
+  group_by(type, sac, area_class, n_measured) %>%
+  summarise(n_selection_correct = sum(selection_correct * measured_cycle1)) %>%
+  ungroup()
+  
+```
+
+If we would include more measured watersurfaces in the current sample, we should only take those watersurfaces that would have been selected based on the original sampling frame.
+
+In Table \@ref(tab:tabmeasurements) we show: 
+
++ the measured watersurfaces hat would have been selected based on the original sampling frame + the total number of measured watersurfaces
+
+This evaluation is based on the current design: we take a sample for all types (except 3110) and all area classes (except > 50 ha).
+
+```{r tabmeasurements}
+check_measurements %>%
+  mutate(show_n = str_c(n_selection_correct,"/", n_measured)) %>%
+  select(type, sac, area_class, show_n) %>%
+  pivot_wider(names_from = area_class, values_from = show_n, values_fill = "0") %>%
+  kable(caption = "Number of measured sampling units that belong to the sample based on the original sampling frame/ Total number of measured sampling units") %>%
+  kable_styling()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

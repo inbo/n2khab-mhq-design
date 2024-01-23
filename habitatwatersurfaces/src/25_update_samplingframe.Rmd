@@ -53,8 +53,10 @@ watersurfaces_refpoints <- read_vc(file = "watersurfaces_refpoints", root = "../
 refpoints_new <- watersurfaces_hab$watersurfaces_polygons %>%
   anti_join(watersurfaces_refpoints, by = "polygon_id") %>%
   # semi_join(mhq_watersurfaces_samplingunits_new, by = "code_watersurfaces") %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")],
+  st_point_on_surface() 
+
+refpoints_new <- refpoints_new %>%
+  mutate(grts_ranking = (terra::extract(grts_master, refpoints_new))$GRTSmaster_habitats,
          in_object = TRUE)
 
 refpoints_new <- refpoints_new %>%
@@ -162,13 +164,61 @@ check <- watersurfaces_populationunits_select %>%
   ungroup() %>%
   filter(n > 1)
 
-watersurfaces_populationunits_select %>%
-  write_vc("mhq_watersurfaces_populationunits", root = "../output", sorting = c("type", "grts_ranking_draw", "polygon_id"), strict = FALSE)
+```
+```{r}
+
+sac_sf <- read_admin_areas(dsn = "sac") %>%
+  group_by(sac_name) %>%
+  summarise(n_pol = n()) %>%
+  ungroup() %>%
+  select(sac_name)
 
 ```
 
 ```{r}
-watersurfaces_populationunits_select %>%
+
+
+watersurfaces_hab <- read_watersurfaces_hab()
+
+filepath <-  file.path(fileman_up("n2khab_data"), "20_processed/watersurfaces_hab/watersurfaces_hab.gpkg")
+
+check_version <- n2khab::xxh64sum(filepath) == "5792b496a94d0524"
+
+watersurfaces_hab <- watersurfaces_hab$watersurfaces_polygons %>%
+  semi_join(watersurfaces_populationunits, by = "polygon_id") %>%
+  select(polygon_id)
+
+watersurfaces_extra <- read_watersurfaces(version = "watersurfaces_v1.1") %>%
+  filter(polygon_id %in% watersurfaces_populationunits$polygon_id) %>%
+  filter(! polygon_id %in% watersurfaces_hab$polygon_id) %>%
+  select(polygon_id)
+
+watersurfaces_area_sf <- watersurfaces_hab %>%
+  bind_rows(watersurfaces_extra) %>%
+  mutate(area_ha = drop_units(st_area(geom))/10000,
+         area_polygon_ha = area_ha,
+         area_class = ifelse(area_ha <= 1, "area <= 1 ha",
+                             ifelse(area_ha <= 5, "1 ha < area <= 5 ha",
+                                    ifelse(area_ha < 50, "5 ha < area < 50 ha", "area >= 50 ha"))),
+         area_class = factor(area_class, levels = c("area <= 1 ha", "1 ha < area <= 5 ha", "5 ha < area < 50 ha", "area >= 50 ha"))) %>%
+  st_join(sac_sf) %>%
+  mutate(sac = !is.na(sac_name)) 
+
+watersurfaces_area <- watersurfaces_area_sf %>%
+  st_drop_geometry() %>%
+  select(polygon_id, area_class, sac)
+
+watersurfaces_populationunits <- watersurfaces_populationunits_select %>%
+  left_join(watersurfaces_area, by = "polygon_id") %>%
+  select(scheme, sampling_unit_code, polygon_id, area_class, sac, everything())
+
+watersurfaces_populationunits %>%
+  write_vc("mhq_watersurfaces_populationunits", root = "../output", sorting = c("type", "grts_ranking_draw", "polygon_id"), strict = FALSE)
+```
+
+
+```{r}
+watersurfaces_populationunits %>%
   slice(1:5, 400:405)
 ```
 

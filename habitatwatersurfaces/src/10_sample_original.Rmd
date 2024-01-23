@@ -95,8 +95,10 @@ sample_2014_refpoint <- bind_rows(refpoint_3130_aom, refpoint_3130_na, refpoint_
   unique() %>%
   mutate(x_refpoint = x_centroid,
          y_refpoint = y_centroid) %>%
-  st_as_sf(coords = c("x_centroid", "y_centroid"), crs = 31370) %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")],
+  st_as_sf(coords = c("x_centroid", "y_centroid"), crs = 31370) 
+
+sample_2014_refpoint <- sample_2014_refpoint %>%
+  mutate(grts_ranking = (terra::extract(grts_master, sample_2014_refpoint))$GRTSmaster_habitats,
          pol_id = as.character(pol_id))
 
 ```
@@ -123,13 +125,15 @@ check_ranking %>%
 
 ### Reproduce centroids
 
-We also check if we can reproduce the centroids, as a different location of the centroid can result in a differncet grs-ranking.
+We also check if we can reproduce the centroids, as a different location of the centroid can result in a different grts-ranking.
 
 ```{r}
 
 sample_2014_ranking_centroid <- sample_2014_sf %>%
-  st_centroid() %>%
-  mutate(grts_ranking_centroid = grts_master[as(., "Spatial")])
+  st_centroid() 
+
+sample_2014_ranking_centroid <- sample_2014_ranking_centroid %>%
+  mutate(grts_ranking_centroid = (terra::extract(grts_master, sample_2014_ranking_centroid))$GRTSmaster_habitats)
 
 sample_2014_ranking_centroid <- sample_2014_ranking_centroid %>%
   select(-grts_ranking) %>%
@@ -156,11 +160,6 @@ check_centroid %>%
   kable() %>%
   kable_styling()
 ```
-
-
-
-
-
 
 Below an example for polygon wit pol_id = 19144.
 The red is the originally calculated centroid, the blue dot the currently derived centroid.
@@ -304,7 +303,7 @@ refpoints_31xx <- refpoints_31xx %>%
 
 ```{r}
 refpoints_31xx_check <- refpoints_31xx %>%
-  mutate(grts_ranking_check = grts_master[as(., "Spatial")]) 
+  mutate(grts_ranking_check = (terra::extract(grts_master, refpoints_31xx))$GRTSmaster_habitats) 
 
 ```
 
@@ -336,8 +335,10 @@ We will check if we can reproduce the reference points for 31xx.
 ```{r}
 
 check_refpoint_31xx <- sampleframe_31xx_2016_sf %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking_refpoint = grts_master[as(., "Spatial")]) %>%
+  st_point_on_surface() 
+
+check_refpoint_31xx <- check_refpoint_31xx %>%
+  mutate(grts_ranking_refpoint = terra::extract(grts_master, check_refpoint_31xx)$GRTSmaster_habitats) %>%
   select(pol_id, grts_ranking_refpoint)
 
 check_refpoint_31xx <- check_refpoint_31xx %>%
@@ -369,11 +370,6 @@ check_refpoint_31xx %>%
 
 ```
 
-
-
-
-
-
 A wrong grts_ranking was obtained for 2190 sampling units (reading the shape file with grts-ranking values converted the grts-ranking values to factor levels)
 
 We will use the variable grts_ranking_draw to indicate the originally used grts-ranking for drawing the sample.
@@ -381,8 +377,10 @@ We will use the variable grts_ranking_draw to indicate the originally used grts-
 ```{r}
 
 refpoint_2190 <- sampleframe_2190_sf %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")]) %>%
+  st_point_on_surface()
+
+refpoint_2190 <- refpoint_2190 %>%
+  mutate(grts_ranking = terra::extract(grts_master, refpoint_2190)$GRTSmaster_habitats) %>%
   select(pol_id, grts_ranking)
 
 refpoints_2016 <- refpoints_31xx %>%

@@ -4,7 +4,7 @@
 
 An overview of the assessed watersurfaces is provided 
 
-+ in the file OverzichtMeetnet&Steekproef_HT31XX_11_12_2020.xlsx for types 31xx
++ in the file OverzichtMeetnet&Steekproef_HT31XX_18_12_2023.xlsx for types 31xx
 + in the file Steekproefkader_2190_versie20170606.shp
 
 Both files can be found in [this google drive folder](https://drive.google.com/drive/folders/19NsppwrC47ZAjv8Ndoh6aChkdud801T2).
@@ -22,7 +22,8 @@ The admin data provide information on:
 + the code that is used in inboveg
 
 ```{r}
-admin_orig <- read_excel("../data/OverzichtMeetnet&Steekproef_HT31XX_11_12_2020.xlsx")
+admin_orig <- read_excel("../data/OverzichtMeetnet&Steekproef_HT31XX_18_12_2023.xlsx") %>%
+  mutate(ID_Plas = str_remove(ID_Plas, "\\.0"))
 
 admin_assessments_watersurfaces <- admin_orig %>%
   mutate(sac = ifelse(!is.na(SBZH), SBZH, SBZ)) %>%
@@ -45,13 +46,11 @@ admin_assessments_watersurfaces_types <- admin_assessments_watersurfaces %>%
 ```
 
 
-
-
 ### Habitattype 2190
 
 ```{r}
 
-watersurfaces <- read_watersurfaces() %>%
+watersurfaces <- read_watersurfaces(version = "watersurfaces_v1.1") %>%
   select(code_watersurfaces = polygon_id)
 
 admin_2190_orig <- read_sf("../data/voortgang_2190/Steekproefkader_2190_versie20170606.shp") %>%
@@ -143,8 +142,10 @@ mhq_watersurfaces_refpoints_extra <- assessments_mhq_watersurfaces %>%
   distinct(pol_id, code_watersurfaces) %>%
   left_join(watersurfaces, by = "code_watersurfaces") %>%
   st_as_sf() %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking_extra = grts_master[as(., "Spatial")]) 
+  st_point_on_surface()
+
+mhq_watersurfaces_refpoints_extra <- mhq_watersurfaces_refpoints_extra %>%
+  mutate(grts_ranking_extra = (terra::extract(grts_master,mhq_watersurfaces_refpoints_extra))$GRTSmaster_habitats) 
 
 assessments_mhq_watersurfaces <- assessments_mhq_watersurfaces %>%
   left_join(st_drop_geometry(mhq_watersurfaces_refpoints_extra), by = c("code_watersurfaces", "pol_id")) %>%
@@ -168,14 +169,14 @@ coord_sample_replaced <- mhq_watersurfaces_refpoints_orig %>%
   st_drop_geometry() %>%
   mutate(x_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
          y_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
-  select(-grts_ranking) %>%
+  select(-grts_ranking, -code_watersurfaces) %>%
   rename(pol_id_replaced = pol_id)
 
 coord_sample <- mhq_watersurfaces_refpoints_orig %>%
   st_drop_geometry() %>%
   mutate(x = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
          y= st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
-  select(-grts_ranking)
+  select(-grts_ranking, -code_watersurfaces)
 
 replacement_31xx <- assessments_mhq_watersurfaces %>%
   filter(str_detect(note, c("verschuiving van|verschoven van"))) %>%
@@ -210,8 +211,6 @@ replacement_2190 <- assessments_mhq_watersurfaces %>%
   left_join(coord_sample, by = "pol_id") %>%
   left_join(coord_sample_replaced, by = "pol_id_replaced") %>%
   mutate(distance_replaced = round(sqrt((x - x_replaced) ^ 2 + (y - y_replaced) ^ 2 ), 0))
-
-
 
 replacement <- bind_rows(replacement_2190,
                          replacement_31xx)
@@ -393,8 +392,10 @@ wrong_code %>%
 
 extra_replacement_refpoints <- watersurfaces %>%
   filter(code_watersurfaces %in% wrong_code$code_watersurfaces_recorded) %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking_extra = grts_master[as(., "Spatial")],
+  st_point_on_surface() 
+
+extra_replacement_refpoints <- extra_replacement_refpoints %>%
+  mutate(grts_ranking_extra = (terra::extract(grts_master, extra_replacement_refpoints))$GRTSmaster_habitats,
          pol_id = str_c("extra_", code_watersurfaces))
 
 coords_extra_replacement <- extra_replacement_refpoints %>%
@@ -487,8 +488,10 @@ watersurfaces_no_target_type <- check_visited_31xx %>%
 watersurfaces_no_target_type_refpoints <- watersurfaces_no_target_type %>%
   left_join(watersurfaces, by = "code_watersurfaces") %>%
   st_as_sf() %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")]) %>%
+  st_point_on_surface() 
+
+watersurfaces_no_target_type_refpoints <- watersurfaces_no_target_type_refpoints %>%
+  mutate(grts_ranking = (terra::extract(grts_master$GRTSmaster_habitats, watersurfaces_no_target_type_refpoints))$GRTSmaster_habitats) %>%
   select(pol_id, code_watersurfaces, grts_ranking)
   
 assessments_watersurfaces_no_target_type <- assessments_mhq_watersurfaces %>%
@@ -572,8 +575,10 @@ watersurfaces_not_assessed_overlap_refpoints <- watersurfaces_not_assessed %>%
   filter(n_overlap_pol_id > 1) %>%
   left_join(watersurfaces, by = "code_watersurfaces") %>%
   st_as_sf() %>%
-  st_point_on_surface() %>%
-  mutate(grts_ranking_new = grts_master[as(., "Spatial")]) %>%
+  st_point_on_surface() 
+
+watersurfaces_not_assessed_overlap_refpoints <- watersurfaces_not_assessed_overlap_refpoints %>%
+  mutate(grts_ranking_new = (terra::extract(grts_master, watersurfaces_not_assessed_overlap_refpoints))$GRTSmaster_habitats) %>%
   select(pol_id, code_watersurfaces, grts_ranking_new)
   
 assessments_watersurfaces_not_assessed <- assessments_mhq_watersurfaces %>%
@@ -675,7 +680,18 @@ check_double3 <- assessments_mhq_watersurfaces_double %>%
   ungroup() %>%
   filter(n > 1)
 
+mhq_refpoints_double <-  assessments_mhq_watersurfaces_double3 %>%
+  distinct(pol_id, code_watersurfaces) %>%
+  group_by(code_watersurfaces) %>%
+  summarise(pol_id = str_c(pol_id, collapse = "; ")) %>%
+  ungroup() %>%
+  left_join(watersurfaces, by = "code_watersurfaces") %>%
+  st_as_sf() %>%
+  st_point_on_surface() 
 
+mhq_refpoints_double <- mhq_refpoints_double %>%
+  mutate(grts_ranking = (terra::extract(grts_master, mhq_refpoints_double))$GRTSmaster_habitats) %>%
+  select(pol_id, code_watersurfaces, grts_ranking)
 
 # mhq_refpoints_double <-  assessments_mhq_watersurfaces_double3 %>%
 #   distinct(pol_id, code_watersurfaces) %>%

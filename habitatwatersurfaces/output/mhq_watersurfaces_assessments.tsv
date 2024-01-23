@@ -1,7 +1,7 @@
 assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inaccessible
 15706	WVLBRN0145	30	1	1	field assessment	NA
 16071	ANTBAL0711	30	0	0	field assessment	NA
-16071	ANTBCT0572	31	1	1	field assessment	NA
+16071	ANTBCT0572	31	1	1	NA	long term
 16071	ANTBRM0421	33	0	0	field assessment	NA
 16071	ANTBRS0068	30	1	1	field assessment	NA
 16071	ANTBRS0068	31	1	1	field assessment	NA
@@ -108,6 +108,8 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16071	LIMMSM0026	31	1	1	field assessment	NA
 16071	LIMMSM0197	34	1	1	field assessment	NA
 16071	LIMZNH0138	30	0	0	field assessment	NA
+16071	LIMZNH0238	30	1	1	field assessment	NA
+16071	LIMZNH0238	31	1	1	field assessment	NA
 16071	LIMZNH0333	30	1	1	field assessment	NA
 16071	LIMZNH0333	34	1	1	field assessment	NA
 16071	LIMZNH0360	30	1	1	field assessment	NA
@@ -166,9 +168,9 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16436	ANTBRM0255	33	0	NA	field assessment	NA
 16436	ANTBRS0121	30	0	NA	field assessment	NA
 16436	ANTBSE0021	31	0	NA	field assessment	NA
-16436	ANTBSE0061	30	1	1	field assessment	NA
-16436	ANTBSE0061	31	1	1	field assessment	NA
-16436	ANTBSE0061	32	1	1	field assessment	NA
+16436	ANTBSE0061	30	1	1	NA	long term
+16436	ANTBSE0061	31	1	1	NA	long term
+16436	ANTBSE0061	32	1	1	NA	long term
 16436	ANTBSE0109	30	0	NA	field assessment	NA
 16436	ANTBSE0165	31	1	1	field assessment	NA
 16436	ANTBSE0197	33	0	NA	field assessment	NA
@@ -373,8 +375,6 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16436	LIMZNH0225	30	0	NA	field assessment	NA
 16436	LIMZNH0225	31	1	1	field assessment	NA
 16436	LIMZNH0231	30	0	NA	field assessment	NA
-16436	LIMZNH0238	30	1	1	field assessment	NA
-16436	LIMZNH0238	31	1	1	field assessment	NA
 16436	LIMZNH0338	28	1	1	field assessment	NA
 16436	LIMZNH0338	30	0	NA	field assessment	NA
 16436	LIMZNH0338	34	1	1	field assessment	NA
@@ -491,7 +491,7 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16801	ANTMOL0099	33	0	NA	field assessment	NA
 16801	ANTMOL0568	30	1	1	field assessment	NA
 16801	ANTMOL0568	31	1	1	field assessment	NA
-16801	ANTRAV0381	33	1	1	field assessment	NA
+16801	ANTRAV0381	33	1	1	NA	long ter
 16801	ANTRIJ0005	30	0	NA	field assessment	NA
 16801	ANTRIJ0005	31	1	1	field assessment	NA
 16801	ANTRIJ0030	31	0	NA	field assessment	NA
@@ -572,10 +572,9 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 17167	ANTBAL0592	33	1	1	field assessment	NA
 17167	ANTBAL0595	33	1	1	field assessment	NA
 17167	ANTESS0009	30	1	1	field assessment	NA
-17167	ANTESS0062	30	1	1	field assessment	NA
-17167	ANTESS0062	34	1	1	field assessment	NA
+17167	ANTESS0062	30	1	1	NA	long term
+17167	ANTESS0062	34	1	1	NA	long term
 17167	ANTGEE0046	33	1	1	field assessment	NA
-17167	ANTGEE0069	33	1	1	field assessment	NA
 17167	ANTGEE0107	30	1	1	field assessment	NA
 17167	ANTGEE0107	31	1	1	field assessment	NA
 17167	ANTGEE0107	33	1	1	field assessment	NA
@@ -612,7 +611,6 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 17167	LIMHAS0281	30	1	1	field assessment	NA
 17167	LIMHAS0281	33	1	1	field assessment	NA
 17167	LIMHEC0128	33	1	1	field assessment	NA
-17167	LIMHEC0201	33	1	1	field assessment	NA
 17167	LIMHHE0330	30	1	1	field assessment	NA
 17167	LIMHLN0068	33	1	1	field assessment	NA
 17167	LIMKIN0231	33	1	1	field assessment	NA
@@ -664,10 +662,8 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 17532	ANTKAS0474	30	1	1	field assessment	NA
 17532	ANTSIL0322	30	1	1	field assessment	NA
 17532	LIMHEC0537	30	1	1	field assessment	NA
-17532	OVLBLE0248	33	1	1	field assessment	NA
 17532	VBRARS0052	30	1	1	field assessment	NA
 17532	VBRARS0052	33	1	1	field assessment	NA
-17532	VBRZOU0046	33	1	1	field assessment	NA
 17532	WVLBLA0206	21	1	1	field assessment	NA
 17532	WVLBRD0035	21	1	1	field assessment	NA
 17532	WVLBRD0039	21	1	1	field assessment	NA

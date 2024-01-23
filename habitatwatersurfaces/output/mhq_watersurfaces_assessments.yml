@@ -7,7 +7,7 @@
   - polygon_id
   - type
   hash: 61552552a303d3912e8c6b45c7384cebf02b69ce
-  data_hash: 8afa4a3c49fcbf014c13322689641c904290be57
+  data_hash: ce1f3166f516c49e702beb76e09992e13eb3d8e9
 assessment_date:
   class: Date
   origin: '1970-01-01'
