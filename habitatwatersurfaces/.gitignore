@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rprofile
+*.html
+*.md
+*.zip
+output/
+src/_bookdown_files/
+
