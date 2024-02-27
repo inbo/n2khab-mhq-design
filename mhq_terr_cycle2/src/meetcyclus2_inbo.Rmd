@@ -1,0 +1,111 @@
+---
+title: "Meetnet habitatkwaliteit: meetcyclus 2"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE) 
+
+library(tidyverse)
+library(git2rdata)
+library(kableExtra)
+library(n2khab)
+library(DT)
+library(sf)
+library(lubridate)
+library(leaflet) 
+library(leaflet.extras2)
+library(leaflet.extras)
+library(crosstalk)
+
+```
+
+# Vervangpunten
+
+De rode punten geven de nieuwe meetpunten weer. Indien het habitattype (waarvoor het meetpunt werd geselecteerd) niet aanwezig is in het nieuwe meetpunt, moet er een vervangpunt gekozen worden (gele punten) binnen dezelfde habitatkaartpolygoon. De vervangpunten liggen in een vierkant van 200x200 meter rond het meetpunt. Je kiest het vervangpunt met het laagste rangnummer waar het habitattype aanwezig is. Bij kleine langerekte polygonen zullen er maar weinig vervangpunten liggen binnen het 200x200 meter-vierkant. In dat geval worden nog bijkomende vervangpunten weergegeven (blauwe punten).
+
+In onderstaande kaart kan je via het vergrootglas-icoon een habitatkaartpolygoon selecteren (via polygon_id) en zo inzoomen op deze polygoon, en de meetpunten en vervangpunten bekijken. Indien er meerdere meetpunten in een habitatkaartpolygoon liggen, kan je in het selectievenster de code van het meetpunt ingeven om de vervangpunten voor dat meetpunt te selecteren.
+
+Je kan ook inzoomen op je huidige locatie (via icoontje net boven printer-icoontje). 
+
+
+
+
+
+
+```{r}
+vervangpunten_inbo <- read_csv2("../output/mhq_terr_vervangpunten_inbo.csv")
+su_inbo <- read_csv2("../output/mhq_terr_cyclus2_inbo.csv")
+
+vervangpunten_inbo <- vervangpunten_inbo %>%
+  st_as_sf(coords =c("x", "y"), crs = 31370) %>%
+  st_transform(4326)
+
+nieuwe_punten_inbo <- su_inbo %>%
+  filter(is.na(datum_opname_cyclus1)) %>%
+  st_as_sf(coords =c("x", "y"), crs = 31370) %>%
+  st_transform(4326)
+
+vervangpunten_inbo <- vervangpunten_inbo %>%
+  filter(point_code_vervang %in% nieuwe_punten_inbo$point_code) %>%
+  st_as_sf(coords =c("x", "y"), crs = 31370) %>%
+  st_transform(4326)
+
+habmap_terr <- read_habitatmap_terr()
+
+polygonen <- habmap_terr$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% nieuwe_punten_inbo$polygon_id) %>%
+  st_transform(4326) %>%
+  mutate(polygon_id = as.character(polygon_id)) %>%
+  select(polygon_id)
+```
+
+```{r}
+
+sd <- SharedData$new(vervangpunten_inbo)
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+      sd %>%
+      leaflet() %>%
+        addTiles(group = "OSM") %>%
+        addProviderTiles(providers$Esri.WorldImagery, group = "Orthofoto") %>%
+        addPolygons(data = polygonen, label = ~polygon_id, group = "Polygonen Habitatkaart") %>%
+        addCircleMarkers(data= nieuwe_punten_inbo, color = "red", popup = ~str_c(habitattype, "-", point_code), label = ~str_c(habitattype, "-", point_code)) %>%
+        addCircleMarkers(label = ~ ifelse(!is.na(rank_rel_buffer), rank_rel_buffer, str_c(rank_rel_polygon)),
+                         color = ~ifelse(!is.na(rank_rel_buffer), "yellow", "blue"),
+                         labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE),
+                         group = "Vervangpunten") %>%
+        # addSearchFeatures(
+        #   targetGroups = "Polygonen Habitatkaart", # group should match addMarkers() group
+        #   options = searchFeaturesOptions(
+        #     zoom=16, openPopup = TRUE, firstTipSubmit = TRUE,
+        #     autoCollapse = TRUE, hideMarkerOnCollapse = TRUE
+        #   )) %>%
+        addResetMapButton() %>%
+        addLayersControl(baseGroups = c("OSM", "Orthofoto"),
+                         options = layersControlOptions(collapsed = TRUE)) %>%
+        addEasyButton(easyButton(
+          icon="fa-crosshairs", title="Locate Me",
+          onClick = JS("function(btn, map){ map.locate({setView: true}); }"))) %>%
+          # onClick=JS("function(btn, map){ map.locate({drawMarker: true}); }"))) %>%
+        addFullscreenControl() %>%
+        addEasyprint()
+  )
+)
+
+
+```
+
+

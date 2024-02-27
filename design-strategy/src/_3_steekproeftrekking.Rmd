@@ -1,0 +1,262 @@
+## Steekproefkader
+
+```{r}
+
+habmap_terr <- read_habitatmap_terr(keep_aq_types = FALSE)
+
+min_phab <- 10
+
+habmap_types <- habmap_terr$habitatmap_terr_types %>%
+    group_by(polygon_id, code_orig) %>%
+      mutate(n = n()) %>%
+    ungroup() %>%
+    group_by(polygon_id, type) %>%
+     summarise(phab = sum(phab/n),
+              code_orig = str_c(code_orig, collapse = "; ")) %>%
+    ungroup() %>%
+    filter(phab > min_phab)
+
+habmap_polygons <- habmap_terr$habitatmap_terr_polygons %>%
+    filter(polygon_id %in% habmap_types$polygon_id) 
+
+types <- read_types() %>%
+  select(type, typelevel, main_type)
+
+sac <- read_admin_areas(dsn = "sac") %>%
+  select(sac_code)
+
+grts_master <- read_GRTSmh()
+```
+
+
+
+```{r,eval=FALSE}
+ 
+grts_habmap <- grts_master %>%
+    crop(habmap_polygons) %>%
+    mask(habmap_polygons) %>%
+    rasterToPoints(spatial = TRUE) %>%
+    st_as_sf()
+
+grts_habmap2 <-  grts_habmap %>%
+  mutate(x = st_coordinates(grts_habmap)[,1],
+         y = st_coordinates(grts_habmap)[,2])%>%
+  st_join(habmap_polygons) %>%
+  st_join(sac) %>%
+  mutate(sac = !is.na(sac_code)) %>%
+  select(polygon_id, grts_ranking = GRTSmaster_habitats, sac, x, y) %>%
+  st_drop_geometry()
+
+write_vc(grts_habmap2, file = "samplingframe_habitatterr_points", root = "../output", sorting = "grts_ranking", strict = FALSE)
+
+```
+
+## Steekproeftrekking Habitatkaart
+
+```{r}
+grts_habmap <- read_vc(file = "samplingframe_habitatterr_points", root = "../output")
+
+grts_habmap_types <- grts_habmap %>%
+  left_join(habmap_types, by = "polygon_id") %>%
+  filter(!is.na(type)) %>%
+  group_by(type, sac) %>%
+  mutate(ranking = rank(grts_ranking)) %>%
+  ungroup()
+
+grts_habmap_types_top <- grts_habmap_types %>%
+  group_by(type, sac) %>%
+  top_n(1000, desc(grts_ranking)) %>%
+  ungroup()
+
+```
+
+```{r}
+
+samplesize_original <- read_vc(file = "samplesize_mhq_terr_v2020", "../output" )
+
+samplesize_original_tot <- samplesize_original %>%
+  mutate(n_tot = ceiling(n_finite_flanders + n_extra_sac + n_extra_subtype),
+         n_visits_tot = ceiling((n_finite_flanders + n_extra_sac + n_extra_subtype)/prop_subtype_sac)) %>%
+  select(type, sac, n_tot, n_visits_tot, n_extra_sac, n_extra_subtype)
+
+```
+
+## Update mhq_refpoints
+
+```{r}
+mhq_refpoints <- read_vc(file = "mhq_terr_refpoints_check_update", root = file.path(fileman_up("n2khab-sample-admin"), "data"))
+
+mhq_assessments <- read_vc(file = "mhq_terr_assessments", root = file.path(fileman_up("n2khab-sample-admin"), "data"))
+# 
+# mhq_refpoints_check <- mhq_refpoints %>%
+#   left_join(select(mhq_assessments, point_code, type_target, is_type_target, type_observed), by = c("point_code", "type_target"))
+
+mhq_assessments_todo <- mhq_assessments %>%
+  filter(is.na(assessment_source)) %>%
+  filter(is.na(inaccessible)) 
+
+mhq_status <- mhq_assessments %>%
+  mutate(status = ifelse(!is.na(inaccessible), "inaccessible",
+                         ifelse(!is.na(assessment_source), "assessed", "to_do"))) %>%
+  left_join(select(mhq_refpoints, point_code, grts_ranking), by = "point_code") %>%
+  distinct(grts_ranking, status)
+
+mhq_refpoints_todo <- mhq_refpoints %>%
+  filter(point_code %in% mhq_assessments_todo$point_code) %>%
+  filter(!(legacy_site & str_sub(type_target, 1, 1) == "9"))
+
+mhq_refpoints_todo_n <- mhq_refpoints_todo %>%
+  group_by(type_target, sac) %>%
+  summarise(n_to_do = n()) %>%
+  ungroup() %>%
+  rename(type = type_target) %>%
+  mutate(type = ifelse(type == "2190", "2190_overig", as.character(type)))
+
+```
+
+```{r}
+mhq_refpoints_todo_update <- grts_habmap_types_top %>%
+  left_join(mhq_status, by = "grts_ranking") %>%
+  mutate(status = ifelse(is.na(status), "new", status),
+         assessed = status %in% c("assessed", "inaccessible")) %>%
+  left_join(mhq_refpoints_todo_n, by = c("type", "sac")) %>%
+  group_by(type, sac, assessed) %>%
+  mutate(ranking_temp = rank(grts_ranking)) %>%
+  ungroup() %>%
+  mutate(sample = !assessed & ranking_temp <= n_to_do,
+         reserve = !assessed & ranking_temp > n_to_do & ranking_temp < (n_to_do + 100)) %>%
+  filter(sample | reserve ) 
+  
+mhq_refpoints_unselect <- mhq_refpoints_todo %>%
+  mutate(type = type_target) %>%
+  anti_join(mhq_refpoints_todo_update, by = c("grts_ranking", "type"))
+
+check_to_do <- mhq_refpoints_todo_update %>%
+  group_by(type, sac, n_to_do) %>%
+  summarise(n_samples = sum(sample)) %>%
+  ungroup() %>%
+  mutate(check = n_to_do == n_samples)
+  
+check_new_samples <- mhq_refpoints_todo_update %>%
+  group_by(type, sac, n_to_do, status, sample) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+check_no_sample <-  grts_habmap_types %>%
+  left_join(mhq_refpoints_todo_n, by = c("type", "sac")) %>%
+  mutate(sample = ranking <= n_to_do,
+         reserve = ranking > n_to_do & ranking < (n_to_do + 100)) %>%
+  group_by(type) %>%
+  summarise(no_sample_to_do = sum(sample, na.rm = TRUE) == 0) %>%
+  ungroup() %>%
+  mutate(sample = type %in% mhq_refpoints$type_target) %>%
+  filter(no_sample_to_do)
+```
+
+```{r}
+
+schemes_mhq <- read_scheme_types() %>%
+    select(scheme, type) %>%
+    filter(str_sub(scheme, 1, 2) == "HQ") %>%
+    left_join(types, by = "type")
+
+year_planned_original <- mhq_refpoints %>%
+  group_by(point_code, type_target) %>%
+  summarise(year_planned = min(year_planned)) %>%
+  ungroup()
+
+mhq_refpoints_todo_potential <- mhq_refpoints_todo_update %>%
+  left_join(schemes_mhq, by = "type") %>%
+  rename(type_target = "type") %>%
+  mutate(sampling_unit_code = str_c(grts_ranking, "_", type_target),
+         point_code = str_c(grts_ranking, "_1"),
+         legacy_site = FALSE,
+         is_centroid = TRUE,
+         grts_ranking_draw = grts_ranking,
+         db_ref = point_code) %>%
+  left_join(year_planned_original, by = c("point_code", "type_target")) %>%
+  select(scheme, sampling_unit_code, point_code, type_target, sac, grts_ranking, is_centroid, grts_ranking_draw,  legacy_site, x, y, db_ref, status, phab, year_planned)
+  
+write_vc(mhq_refpoints_todo_potential, root = "../output", file = "mhq_refpoints_todo_potential", sorting = c("sampling_unit_code"))
+
+```
+
+
+
+
+
+
+```{r}
+
+select_4010 <- habmap_types %>%
+  filter(type == "4010")
+
+map_4010 <- habmap_terr$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% select_4010$polygon_id) %>%
+  st_transform(crs = 4326)
+
+points_4010 <- mhq_refpoints_todo_update %>%
+  filter(type  == "4010") %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(crs = 4326)
+
+habmap_2014_polygons <- read_sf(dsn = file.path(fileman_up("n2khab-sample-admin"), "mhq_sample-admin_data/original/sample/sampleframe" ),
+                       layer = "BWK_hab_ter_SBZH_versie20140324", crs = 31370)
+
+types_2014_4010 <- read.table(file.path(fileman_up("n2khab-sample-admin"), "mhq_sample-admin_data/original/sample/sampleframe/BWK_habsubt_versie20140324.txt")) %>%
+  filter(habsubt == "4010") %>%
+  filter(phab > 10)
+
+map_4010_old <- habmap_2014_polygons %>%
+  filter(Pol_ID %in% types_2014_4010$Pol_ID) %>%
+  st_transform(crs = 4326)
+
+map_4010_old_lambert <- habmap_2014_polygons %>%
+  filter(Pol_ID %in% types_2014_4010$Pol_ID)
+
+check_points_unselect_4010 <- mhq_refpoints_unselect %>%
+  filter(type  == "4010") %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  # st_transform(crs = 4326) %>%
+  # st_join(select(map_4010, polygon_id)) %>%
+  st_join(select(habmap_polygons, polygon_id, description)) %>%
+  st_join(select(map_4010_old_lambert, Pol_ID)) %>%
+  left_join(types_2014_4010, by = "Pol_ID")
+
+
+
+points_unselect_4010 <-  mhq_refpoints_unselect %>%
+  filter(type  == "4010") %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(crs = 4326) 
+
+```
+
+
+```{r}
+locaties_shared <- SharedData$new(points_4010) 
+  
+colorpal <- c(INBOgreen, INBOred,  "yellow", INBOblue)
+
+factpal <- colorFactor(colorpal, locaties_shared$status)
+
+bscols(
+  list(
+    bscols(widths = c(4, 4, 4),
+    filter_checkbox("status", "status", locaties_shared, ~status),
+    filter_checkbox("sample", "sample", locaties_shared, ~sample),
+    filter_checkbox("reserve", "reserve", locaties_shared, ~reserve)),
+    locaties_shared %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = map_4010, label = ~polygon_id, color = "gray") %>%
+      addPolygons(data = map_4010_old, label = ~Pol_ID, color = "orange") %>%
+      addCircleMarkers(color = ~factpal(status),
+                       label = ~grts_ranking) %>%
+      addMarkers(data = points_unselect_4010, 
+                       label = ~grts_ranking) %>%
+      addLegend("bottomright", pal = factpal, values = ~status,
+                title = "status", opacity = 1)
+    ) 
+)
+```

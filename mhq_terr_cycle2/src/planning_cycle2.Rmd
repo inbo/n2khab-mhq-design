@@ -1,0 +1,1324 @@
+---
+title: "Meetnet habitatkwaliteit: meetcyclus 2"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+    code_folding: hide
+    warning: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#devtools::install_github("tlhenvironment/buffeRs")
+library(tidyverse)
+library(git2rdata)
+library(kableExtra)
+library(n2khab)
+library(DT)
+library(sf)
+library(lubridate)
+library(leaflet) 
+library(leaflet.extras)
+library(crosstalk)
+library(buffeRs)
+```
+
+# Steekproefgrootte
+
+```{r}
+samplesize <- read_vc(root = "../../design-strategy/output", file = "samplesize_mhq_terr_v2021")
+
+samplesize_type <- samplesize %>%
+  filter(sample_type) %>%
+  mutate(n_total_type = n_finite_flanders + n_extra_sac + n_extra_subtype) %>%
+  group_by(main_type, sac) %>%
+  mutate(n_total_main_type = sum(n_finite_flanders) + sum(n_extra_sac)) %>%
+  ungroup() %>%
+  select(type, main_type, sac, n_total_type, n_total_main_type, n_finite_flanders, n_finite_subtype_tot, n_extra_sac, n_extra_subtype)
+
+samplesize_main_type <- samplesize_type %>%
+group_by(main_type) %>%
+  summarise(n_total_type = ceiling(sum(n_total_type)),
+            types = str_c(unique(type), collapse = ";")) %>%
+  ungroup() %>%
+  mutate(n_per_year = ceiling(n_total_type/6)) %>%
+  select(main_type, types, n_total_type, n_per_year)
+
+```
+
+```{r}
+samplesize_main_type %>%
+  filter(n_total_type > 0) %>%
+  datatable(rownames = FALSE,
+            filter = 'top')
+```
+
+# Opnames eerste cyclus
+
+```{r}
+data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr_v2023")
+
+mhq_terr_measurements <- read_vc("mhq_terr_measurements", data_path)
+
+mhq_terr_measurements_val <- read_vc("mhq_terr_measurements_validation", data_path)
+mhq_terr_measurements_val <- mhq_terr_measurements_val %>%
+  select(point_code, measurement_date, valid_sampling_unit, valid_refpoint, valid_type)
+
+mhq_terr_popunits <- read_vc("mhq_terr_popunits", data_path)
+
+mhq_terr_measurements <- mhq_terr_measurements %>%
+  left_join(mhq_terr_measurements_val, by = c("point_code", "measurement_date")) %>%
+  left_join(mhq_terr_popunits, by = c("point_code", "type"))
+
+measurements_cycle1 <- mhq_terr_measurements %>%
+  mutate(valid_sampling_unit = ifelse(is.na(valid_sampling_unit), "unknown",
+                                      ifelse(valid_sampling_unit,"valid", "not_valid"))) %>%
+  group_by(type, sac, valid_sampling_unit) %>%
+  summarise(n_measured = n_distinct(point_code)) %>%
+  ungroup() %>%
+  pivot_wider(names_from = "valid_sampling_unit",
+              values_from = n_measured, values_fill = 0) %>%
+  mutate(n_measured = valid + not_valid + unknown) 
+
+check  <- mhq_terr_measurements %>%
+  group_by(grts_ranking_draw, type) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+progress <- samplesize_type %>%
+  mutate(n_total_type = ceiling(n_total_type)) %>%
+  filter(n_total_type > 0) %>%
+  filter(str_sub(type, 1, 1) != "9") %>%
+  left_join(measurements_cycle1, by = c("sac", "type"),) %>%
+  mutate(n_measured = ifelse(is.na(n_measured), 0, n_measured),
+         valid = ifelse(is.na(valid), 0, valid),
+         progress_total = round(n_measured/n_total_type, 2),
+         progress_valid = round(valid/n_total_type, 2)) 
+```
+
+```{r}
+
+progress %>%
+  select(type, sac, samplesize = n_total_type, n_measured_total = n_measured, n_measured_valid = valid, progress_total, progress_valid) %>%
+  datatable(rownames = FALSE,
+            filter = 'top') %>%
+  formatPercentage(c("progress_total", "progress_valid"))
+```
+
+```{r}
+mhq_terr_measurements %>%
+  mutate(main_type = str_sub(type, 1, 4),
+         jaar = year(measurement_date)) %>%
+  ggplot(aes(x = jaar, fill = valid_sampling_unit)) +
+  geom_bar() +
+  facet_wrap(~main_type) +
+  labs(y = "Aantal opnames") +
+  theme(axis.text.x = element_text(angle = 90))
+```
+
+
+
+
+# Selectie punten tweede cyclus voor grasland-, heide-, en moerashabitats
+
+## Vervollediging van steekproefkader op basis van de Habitatkaart 2020
+
+Voor het steekproefkader maken we gebruik van:
+
++ alle geëvalueerde steekproefeenheden in de eerste meetcyclus
++ bijkomende (nog niet geëvalueerde) steekproefeenheden op basis van de Habitatkaart 2020
+
+
+```{r, eval = FALSE}
+
+grts_habmap <- read_vc(file = "design-strategy/output/samplingframe_habitatterr_points", root = fileman_up("n2khab-mhq-design"))
+
+habmap <- read_habitatmap_terr()
+
+grts_habmap_types <- grts_habmap %>%
+  left_join(habmap$habitatmap_terr_types, by = "polygon_id") %>%
+  filter(!is.na(type)) %>%
+  filter(str_sub(type, 1, 4) %in% samplesize_main_type$main_type) %>%
+  filter(phab > 10) %>%
+  group_by(type, sac) %>%
+  mutate(ranking_rel = rank(grts_ranking)) %>%
+  ungroup()
+
+terr_assessments <- read_vc("mhq_terr_assessments", data_path)
+terr_refpoints <- read_vc("mhq_terr_refpoints", data_path)
+
+no_habitat <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(no_habitat)
+
+type_not_present <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(!is_present)
+
+type_notcentroid <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(!is_centroid) %>%
+    anti_join(mhq_terr_popunits, by = c("point_code"))
+
+type_present <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(is_present)
+
+inaccessible_not_measurable <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(inaccessible == "long term" | not_measurable == "long term")
+
+legacy_sites_old <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(!is_centroid) %>%
+    anti_join(mhq_terr_popunits, by = c("point_code")) %>%
+    filter(!is_centroid, !change_location) %>%
+    mutate(grts_ranking_draw = as.numeric(str_sub(point_code, end = -3)))
+
+grts_habmap_types_top250 <- grts_habmap_types %>%
+  group_by(type, sac) %>%
+  top_n(250, desc(grts_ranking)) %>%
+  ungroup() %>%
+  mutate(grts_ranking_draw = grts_ranking) %>%
+    anti_join(mhq_terr_popunits, by =c("type", "grts_ranking_draw")) %>%
+    anti_join(mhq_terr_popunits, by =c("type", "grts_ranking")) %>%
+    anti_join(no_habitat, by = "grts_ranking") %>%
+    anti_join(legacy_sites_old, by = "grts_ranking_draw") %>%
+    anti_join(type_not_present, by = c("grts_ranking", "type")) %>%
+    anti_join(type_present, by = c("grts_ranking")) %>%
+    anti_join(inaccessible_not_measurable, by = c("grts_ranking"))
+
+raster_runif <- raster::raster(file.path(fileman_up("n2khab_data"), "20_processed/raster_runif/raster_runif.tif"))
+  
+mhq_terr_refpoints <- read_vc("mhq_terr_refpoints", data_path)
+
+sampleframe_orig <- mhq_terr_popunits %>%
+  anti_join(inaccessible_not_measurable, by = c("point_code")) %>%
+  left_join(mhq_terr_refpoints, by = c("point_code", "grts_ranking"))
+
+legacy_sites <- sampleframe_orig %>%
+  filter(legacy_site)
+
+sampleframe_add <- grts_habmap_types_top250 %>%
+  mutate(point_code = ifelse(grts_ranking %in% legacy_sites$grts_ranking_draw, str_c(grts_ranking, "_2"),
+                       str_c(grts_ranking, "_1")),      
+         legacy_site = FALSE,
+         source = "habitatmap 2020",
+         is_centroid = TRUE) %>%
+  select(point_code, grts_ranking, grts_ranking_draw, sac, legacy_site, type, polygon_id, phab, source, is_centroid, x, y) 
+
+sampleframe <- sampleframe_orig %>%
+  left_join(mhq_terr_measurements_val, by = c("point_code")) %>%
+  filter(str_sub(type, 1, 4) %in% samplesize_main_type$main_type) %>%
+  bind_rows(sampleframe_add) %>%
+  mutate(x_coord = x,
+         y_coord = y) %>%
+  st_as_sf(coords = c("x", "y")) %>%
+  mutate(select_prob = raster_runif[as(., "Spatial")]) %>%
+  st_drop_geometry() %>%
+  filter(!((!legacy_site) & (grts_ranking_draw %in% legacy_sites$grts_ranking_draw))) %>%
+  mutate(measured_valid_cycle1 = !is.na(valid_sampling_unit),
+         measured_cycle1 = !is.na(measurement_date),
+          select_prob = ifelse(measured_valid_cycle1,
+                               ifelse(valid_sampling_unit, 0, select_prob),
+                               select_prob),
+          selection_step1 = (select_prob < phab/100) | is.na(phab))
+
+check_double_grts_ranking_draw <- sampleframe %>%
+  filter(!is.na(grts_ranking_draw)) %>%
+  group_by(grts_ranking_draw, type) %>%
+  filter(n() > 1) %>%
+  filter(str_sub(type, 1, 1 ) != "9") %>%
+  filter(str_sub(type, 1, 4 ) != "6510") %>%
+  filter(str_sub(type, 1, 4 ) != "2330")
+
+#NOG NAKIJKEN!!
+remove_point_code <- check_double_grts_ranking_draw %>%
+  filter(is.na(measurement_date))
+
+#NOG NAKIJKEN!!
+sampleframe <- sampleframe %>%
+  filter(!(point_code %in% c("169137_2", "979286_1", "1676465_2", "3276198_1", "3424742_1"))) %>%
+  anti_join(remove, by = "point_code") %>%
+  unique()
+
+
+check <- sampleframe %>%
+  group_by(point_code, type) %>%
+  filter(n() > 1)
+
+check <- sampleframe %>%
+  filter(measured_cycle1) %>%
+  group_by(point_code) %>%
+  filter(n() > 1)
+
+check <- sampleframe %>%
+  group_by(point_code) %>%
+  filter(n() > 1)
+```
+
+```{r, eval = FALSE}
+
+rm(habmap)
+rm(grts_habmap)
+rm(grts_habmap_types)
+
+habmap <- read_habitatmap()
+
+habmap <- habmap %>%
+  st_drop_geometry() %>%
+  semi_join(sampleframe, by = "polygon_id") %>%
+  select(polygon_id, source)
+
+habmap_source <- habmap %>%
+  mutate(jaar_kartering = str_sub(source, 1, 2),
+         jaar_kartering = str_c(ifelse(as.numeric(jaar_kartering) > 70, "19", "20"), jaar_kartering),
+         jaar_kartering = as.numeric(jaar_kartering))
+
+habmap_source <- habmap_source %>%
+  rename(source_bwk = source)
+
+sampleframe <- sampleframe %>%
+  left_join(habmap_source, by = "polygon_id")
+
+
+check <- sampleframe %>%
+  filter(!measured_cycle1) %>%
+  inner_join(terr_assessments, by = "point_code", suffix = c("_target", "_assessed")) %>%
+  mutate(remove = ((inaccessible == "long term") & !is.na(inaccessible)) |
+                   no_habitat |
+                    (type_target == type_assessed & !is_present ))
+
+remove <- check %>%
+  filter(remove)
+
+check_centroid <- sampleframe %>%
+  mutate(assessed_cycle1 = point_code %in% terr_assessments$point_code) %>%
+  filter((!is_centroid) & (!measured_cycle1) & assessed_cycle1)
+
+sampleframe <- sampleframe %>%
+  anti_join(remove, by = "point_code") %>%
+  anti_join(check_centroid, by = "point_code")
+
+
+
+write_vc(sampleframe, file = "sampleframe_terr", root = "../output", sorting = c("point_code", "type"), strict = FALSE)
+
+rm(habmap)
+```
+
+
+## Steekproefselectie
+
+De steekproefselectie gebeurt in 2 stappen:
+
++ Stap 1: elke steekproefeenheid krijgt een kans op selectie overeenkomstig de waarde voor phab (een steekproefeenheid met phab = 70% voor een bepaald habitattype heeft een selectiekans van 70 %). We maken hiervoor gebruik van de databron raster_runif met random waarden tussen 0 en 1 voor elke steekproefeenheid. Hierdoor is de steekproeftrekking reproduceerbaar.
+
++ Stap 2: uit de in Stap 1 geselecteerde steekproefeenheden selecteren we het aantal gewenste meetpunten op basis van grts_ranking_draw. Deze stap kan gebeuren volgens twee scenario's.
+
+```{r}
+sampleframe <- read_vc(file = "sampleframe_terr", root = "../output")
+
+inaccessible_map <- read_sf(layer = "ontoegankelijk", dsn = "../data/gis", crs = 31370) %>%
+  select(naam = NAAM)
+
+sampleframe <- sampleframe %>%
+  mutate(x = x_coord,
+         y = y_coord) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(inaccessible_map) %>%
+  st_drop_geometry()
+
+#Tovoegen aan assessments
+inaccessible_sampling_units <- sampleframe %>%
+  filter(!is.na(naam))
+
+sampleframe <- sampleframe %>%
+  filter(is.na(naam)) %>%
+  select(-naam)
+
+samplesize_maintype <- samplesize_type %>%
+  select(main_type, sac, n_total_main_type) %>%
+  unique()
+
+samplesize_subtype <- samplesize_type %>%
+  select(type, sac, n_finite_subtype_tot, n_extra_subtype, n_total_type) %>%
+  unique()
+
+sampleframe_step1 <- sampleframe %>%
+  filter(selection_step1) %>%
+  filter(is.na(valid_refpoint) | valid_refpoint) %>%
+  mutate(main_type = str_sub(type, 1, 4),
+         measured_cycle1 = !is.na(measurement_date)) %>%
+  #scenario 2: rangschikking volgens grts_ranking_draw, geen rekening houden met reeds opgemeten meetpunten
+  group_by(main_type, sac) %>%
+  mutate(rank_rel_main_type_sc2 = rank(grts_ranking_draw))%>%
+  ungroup() %>%
+  group_by(type, sac) %>%
+  mutate(n_available = n_distinct(point_code),
+         n_measured_valid = sum(valid_sampling_unit, na.rm = TRUE), 
+         rank_rel_sc2 = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  group_by(type) %>%
+  mutate(rank_rel_subtype_sc2 = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  # scenario 1: prioriteit aan reeds opgemeten geldige meetpunten
+  mutate(reorder_main_type = ifelse(valid_sampling_unit & !is.na(valid_sampling_unit), 
+                               rank_rel_main_type_sc2,
+                               1000 + rank_rel_main_type_sc2),
+         reorder_type = ifelse(valid_sampling_unit & !is.na(valid_sampling_unit), 
+                               rank_rel_sc2,
+                               1000 + rank_rel_sc2),
+         reorder_subtype = ifelse(valid_sampling_unit & !is.na(valid_sampling_unit), 
+                               rank_rel_subtype_sc2,
+                               1000 + rank_rel_subtype_sc2),
+         ) %>%
+  group_by(main_type, sac) %>%
+  mutate(rank_rel_main_type_sc1 = rank(reorder_main_type)) %>%
+  ungroup() %>%
+  group_by(type, sac) %>%
+  mutate( rank_rel_sc1 = rank(reorder_type)) %>%
+  ungroup() %>%
+  group_by(type) %>%
+  mutate(rank_rel_subtype_sc1 = rank(reorder_subtype)) %>%
+  ungroup() %>%
+  left_join(samplesize_subtype, by = c("type", "sac")) %>%
+  left_join(samplesize_maintype, by = c("main_type", "sac")) %>%
+  mutate(n_total_type = ceiling(n_total_type),
+         n_new = pmax(0, n_total_type - n_measured_valid))
+```
+
+
+
+### Scenario 1: maximaal gepaarde plots
+
+In scenario 1 streven we naar het maximaal aantal gepaarde plots:
+
++ alle meetpunten met geldige opnames in meetcyclus 1 worden weerhouden voor meetcyclus 2
++ indien nodig worden bijkomende meetpunten geselecteerd op basis van geactualiseerd steekproefkader
+
+Voordeel: 
+
++ maximaal aantal gepaarde plots dus hogere precisie van de trend
+
+Nadeel:
+
++ minder representatieve steekproef voor huidige toestand (nieuw ontwikkelde gebieden met habitat worden niet gecovered)
+
+
+```{r}
+check_available <- sampleframe_step1 %>%
+  distinct(type, sac, n_available, n_total_type, n_measured_valid, n_new) %>%
+  mutate(sufficent = n_total_type <= n_available)
+```
+
+```{r}
+
+selection_scenarios <- sampleframe_step1 %>%
+  mutate(selected_main_type_sc1= rank_rel_main_type_sc1 <= ceiling(n_total_main_type),
+         selected_subtype_sc1 = ifelse(!is.na(n_finite_subtype_tot), 
+                                   rank_rel_subtype_sc1 <= ceiling(n_finite_subtype_tot),
+                                   FALSE),
+         selected_type_sc1 = ifelse(!is.na(n_total_type), 
+                                rank_rel_sc1 <= ceiling(n_total_type),
+                                FALSE),
+         selected_main_type_sc2 = rank_rel_main_type_sc2 <= ceiling(n_total_main_type),
+         selected_subtype_sc2  = ifelse(!is.na(n_finite_subtype_tot), 
+                                   rank_rel_subtype_sc2 <= ceiling(n_finite_subtype_tot),
+                                   FALSE),
+         selected_type_sc2 = ifelse(!is.na(n_total_type), 
+                                rank_rel_sc2 <= ceiling(n_total_type),
+                                FALSE),
+         reserve_main_type_sc2 = (!selected_main_type_sc2) & (rank_rel_main_type_sc2 <= ceiling(n_total_main_type) + 25), 
+         reserve_subtype_sc2 = (!selected_subtype_sc2) & (rank_rel_subtype_sc2 <= ceiling(n_finite_subtype_tot) + 25)
+         ) 
+
+
+
+# overview_sc1 <- check_available %>%
+#   filter(type != "1330_da") %>%
+#   mutate(main_type = str_sub(type, 1, 4)) %>%
+#   group_by(main_type) %>%
+#   summarise(subtyps = str_c(unique(type), collapse = ","),
+#             n_steekproefgrootte = sum(n_total_type, na.rm = TRUE),
+#             n_opname_c1_tot = sum(n_measured_valid, na.rm = TRUE),
+#             n_opname_c1_voorc2 = sum(pmin(n_measured_valid, n_total_type), na.rm = TRUE),
+#             n_extra_c2 = sum(n_new, na.rm = TRUE))
+```
+
+```{r, eval = FALSE}
+overview_sc1 %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Scenario 2: nieuwe representatieve steekproef
+
+We trekken een nieuwe representatieve steekproef. Door grts-methode toe te passen worden zo veel mogelijk van de meetpunten uit cyclus 1 gerecupereerd.
+
+Voordeel: 
+
++ representatieve steekproef
+
+Nadeel:
+
++ minder gepaarde plots
+
+```{r}
+# selection_scenario_2 <- sampleframe_step1 %>%
+#   mutate(selected_main_type= rank_rel_main_type <= ceiling(n_total_main_type),
+#          selected_subtype = ifelse(!is.na(n_finite_subtype_tot), 
+#                                    rank_rel_subtype <= ceiling(n_finite_subtype_tot),
+#                                    FALSE),
+#          selected_type = ifelse(!is.na(n_total_type), 
+#                                 rank_rel <= ceiling(n_total_type),
+#                                 FALSE)) 
+
+
+```
+
+```{r, eval = FALSE}
+overview_sc2 %>%
+  select(-samplesize_m2, -selected_m2_voorc2) %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+### Vergelijk scenario's
+
+```{r}
+compare_type <- selection_scenarios %>%
+  group_by(main_type, sac, type, n_total_type) %>%
+  summarise(n_measured_cycle1 = sum(measured_cycle1),
+            selected_sc1 = sum(selected_type_sc1),
+            selected_c1_voorc2_sc1 = sum(selected_type_sc1 & measured_cycle1),
+            selected_sc2 = sum(selected_main_type_sc2 | selected_subtype_sc2),
+            selected_c1_voorc2_sc2 = sum((selected_main_type_sc2 | selected_subtype_sc2) & measured_cycle1),
+            # extra_subtype_m1 = sum(selected_subtype & (!selected_main_type)),
+            # selected_m2 = sum(selected_type, na.rm = TRUE),
+            # selected_m2_voorc2 = sum(selected_type & measured_cycle1)
+            ) %>%
+  ungroup() %>%
+  mutate(n_extra_sc1 = selected_sc1 - selected_c1_voorc2_sc1,
+         n_extra_sc2 = selected_sc2 - selected_c1_voorc2_sc2)
+
+
+compare_maintype <- compare_type %>%
+  filter(type != "1330_da") %>%
+  group_by(main_type) %>%
+  filter(str_sub(main_type, 1, 1) != "9") %>%
+  summarise( n_measured_cycle1 = sum(n_measured_cycle1),
+            samplesize_sc1 = sum(selected_sc1, na.rm = TRUE),
+            selected_c1_voorc2_sc1 = sum(selected_c1_voorc2_sc1, na.rm = TRUE),
+            samplesize_sc2 = sum(selected_sc2, na.rm = TRUE),
+            selected_c1_voorc2_sc2 = sum(selected_c1_voorc2_sc2, na.rm = TRUE),
+            n_new_sc1 = sum(n_extra_sc1, na.rm = TRUE),
+            n_new_sc2 = sum(n_extra_sc2, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+
+
+```{r}
+# overview <- overview_sc1 %>%
+#   filter(n_steekproefgrootte > 0) %>%
+#   left_join(select(overview_sc2, main_type, n_opname_c1_voorc2 = selected_m1_voorc2, n_extra_c2 = n_extra), by = "main_type",  suffix = c("_sc1", "_sc2"))
+```
+
+```{r}
+compare_maintype %>%
+  datatable(rownames = FALSE,
+            filter = 'top') 
+```
+
+```{r}
+aandeel_hergebruik_sc1 <- sum(compare_maintype$selected_c1_voorc2_sc1) / sum(compare_maintype$samplesize_sc1)
+
+aandeel_hergebruik_sc2 <- sum(compare_maintype$selected_c1_voorc2_sc2) / sum(compare_maintype$samplesize_sc2)
+
+compare_total <- data.frame(Scenario = c("Scenario 1", "Scenario 2"),
+                            Steekproefgrootte = c(sum(compare_maintype$samplesize_sc1),
+                                                  sum(compare_maintype$samplesize_sc2)),
+                            Aandeel_hergebruik = c(aandeel_hergebruik_sc1, 
+                                                   aandeel_hergebruik_sc2))
+
+compare_total %>%
+  datatable(rownames = FALSE) %>%
+  formatPercentage("Aandeel_hergebruik")
+```
+
+
+
+```{r}
+selection_scenarios_summ <- selection_scenarios %>%
+  filter(str_sub(main_type, 1, 1) != "9") %>%
+  filter(type != "1330_da") %>%
+  mutate(selected_sc1 = selected_type_sc1,
+         selected_sc2 = selected_main_type_sc2 | selected_subtype_sc2,
+         extra_subtype_sc2 = selected_subtype_sc2 & (!selected_main_type_sc2)
+         ) %>%
+  select(point_code, main_type, type, sac, measured_cycle1, valid_sampling_unit, selected_sc1, selected_sc2,  x = x_coord, y = y_coord) %>%
+  mutate(show_color = ifelse(selected_sc1 & selected_sc2, "green",
+                             ifelse(selected_sc1, "blue", "red")),
+         meetpunt_type = ifelse(selected_sc1 & selected_sc2, "scenario 1 en scenario 2 (groen)",
+                             ifelse(selected_sc1, "enkel scenario 1 (blauw)", "enkel scenario 2 (rood)")), 
+         show_label = str_c(point_code, ": ", type),
+         show_fill = ifelse(measured_cycle1, "yellow", "white"))  %>%
+  filter(selected_sc1 | selected_sc2) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(crs = 4326)
+```
+
+De kaart hieronder toon de geselecteerde meetpunten voor de twee scenario's.
+
+De inkleuring van de punten geeft aan of de meetpunten al dan niet opgemeten werden in de eerste meetcyclus:
+
++ geel: opgemeten in eerste meetyclus
++ wit: niet opgemten in eerste meetcyclus
+
+Via de randkleur van de punten onderscheiden we:
+
++ blauwe rand: meetpunt enkel geselecteerd in scenario 1 (het gaat om punten die al opgemeten werden in de eerste meetcyclus)
++ groene rand: meetpunt in beide scenario's geselecteerd
++ rode rand: meetpunt enkel geselecteerd in scenario 2 (het gaat om punten die nog niet opgemeten werden in de eerste meetcyclus)
+
+
+```{r}
+sd <- SharedData$new(selection_scenarios_summ)
+
+bscols(
+  list(
+  bscols(filter_select("type", "Habitat type", sd, ~type),
+         filter_checkbox("measured_cycle1", "Measured cycle 1", sd, ~measured_cycle1),
+         filter_checkbox("selected_sc1", "Selection sc1", sd, ~selected_sc1),
+         filter_checkbox("selected_sc2", "Selection sc2", sd, ~selected_sc2)
+  ),
+  filter_checkbox("meetpunt_type", "Type meetpunt", sd, ~meetpunt_type),
+  sd %>%
+    leaflet() %>%
+    addTiles(group = "open street map") %>%
+    addProviderTiles(providers$Esri.WorldImagery, group = "Esri.WorldImagery") %>%
+    addCircleMarkers(color = ~show_color,
+                     weight = 6, 
+                     fillColor = ~show_fill,
+                     fillOpacity = 0.4,
+                     popup = ~show_label) %>%
+    addLayersControl(
+    baseGroups = c("open street map", "Esri.WorldImagery"),
+    options = layersControlOptions(collapsed = FALSE) %>%
+    addFullscreenControl()
+  )
+)
+)
+```
+
+### Keuze scenario
+
+We kiezen voor scenario 2 omdat dit het meest representatieve beeld geeft van de huidige toestand.
+
+```{r}
+selection <- selection_scenarios %>%
+  filter(str_sub(type, 1, 1) != "9") %>%
+  select(point_code, grts_ranking, grts_ranking_draw, is_centroid, legacy_site, sac, polygon_id, phab, select_prob, main_type, type, measured_cycle1, measurement_date, valid_sampling_unit, rank_rel_main_type_sc2, rank_rel_subtype_sc2, n_total_main_type, n_finite_subtype_tot, selected_main_type_sc2, selected_subtype_sc2, reserve_main_type_sc2, reserve_subtype_sc2, x_coord, y_coord, source_bwk, jaar_kartering) %>%
+  filter(selected_main_type_sc2 | 
+           selected_subtype_sc2 | 
+           reserve_main_type_sc2 |
+         reserve_subtype_sc2 |
+           measured_cycle1) %>%
+  mutate(point_status = ifelse(selected_main_type_sc2 | selected_subtype_sc2, "selected_cycle2",
+                               ifelse(reserve_main_type_sc2 | reserve_subtype_sc2,
+                                      "reserve_cycle2", "not_selelected")))
+
+```
+
+
+
+```{r}
+
+terr_assessments <- read_vc("mhq_terr_assessments", data_path)
+
+selection_new <- selection %>%
+  filter(type != "1330_da") %>%
+  filter(!measured_cycle1) %>%
+  select(point_code, grts_ranking, polygon_id, source_bwk, jaar_kartering, sac, type, phab, point_status, x_coord, y_coord, measured_cycle1) %>%
+  arrange(type, sac, grts_ranking) %>%
+  group_by(type, sac) %>%
+  mutate(volgorde = rank(grts_ranking)) %>%
+  ungroup() %>%
+  left_join(select(terr_assessments, point_code, assessment_date, type_assessed = type, is_present, assessment_source, inaccessible), by = "point_code")
+
+remove_selection_new <- selection_new %>%
+  filter(!is.na(assessment_date)) %>%
+  filter(((type != type_assessed) & is_present) |
+           ((type == type_assessed) & !is_present))
+
+selection_new <- selection_new %>%
+  anti_join(remove_selection_new, by = "point_code") %>%
+  group_by(type, sac) %>%
+  mutate(volgorde = rank(grts_ranking)) %>%
+  ungroup() 
+
+#write_csv2(selection_new, "../output/mhq_nieuwe_punten_cyclus2.csv")
+```
+
+
+
+```{r}
+
+## Nieuwe punten waarvoor er al (niet geselecteerde) opnames zijn in zelfde polygoon
+
+opname_notselected <- selection %>%
+  filter(measured_cycle1) %>%
+  filter(point_status != "selected_cycle2" )
+
+selected_new <- selection %>% 
+  filter(!measured_cycle1) %>%
+  filter(point_status == "selected_cycle2" )  %>% 
+  group_by(polygon_id, type) %>%
+  summarise(n_selected_geenopname = n()) %>%
+  ungroup()
+
+opname_notselected <- selection %>%
+  filter(measured_cycle1) %>%
+  filter(point_status != "selected_cycle2") %>%
+  group_by(polygon_id, type) %>%
+  mutate(n_opname_notselected = n()) %>%
+  ungroup() %>%
+  inner_join(selected_new, by = c("polygon_id", "type"))
+```
+
+
+## Verdeel de meetpunten over de verschillende jaren van de meetcyclus
+
+We verdelen de meetpunten over drie 'panels':
+
++ panel 1: opname in 2022 of 2023
++ panel 2: opname in 2024 of 2025
++ panel 3: opname in 2026 of 2027
+
+De verdeling van de meetpunten over de panels gebeurt als volgt:
+
++ Bestaande meetpunten (opgemeten in eerste meetcylus)
+  + We verdelen de meetpunten evenredig over de verschillende jaren (2022 tot 2027). Daarvoor rangschikken we de punten eerst volgens het jaar van de eerste opname en vervolgens volgens grts_ranking_draw
+  + We berekenen vervolgens het verschil in jaren tussen opeenvolgende opnames. We stellen vervolgens dat er minstens 4 jaar en maximum 8 jaar tussen opeenvolgende metingen moet zijn. Als het berekende verschil in jaren kleiner is dan 4, dan passen we het jaar in meetcyclus 2 aan zodanig dat het verschil gelijk is aan 4. Als het berekende verschil in jaren groter is dan 8, dan passen we het jaar in meetcyclus 2 aan zodanig dat het verschil gelijk is aan 8.  
+  + Uit het jaar in meetcyclus 2 volgt het panelnummer. 
+  
++ Nieuwe meetpunten
+  + We berekenen hoeveel bestaande meetpunten er al zijn in elk panel.
+  + Vervolgens gaan we na hoeveel meetpunten er nog nodig zijn in elk panel bij een gelijke verdeling van meetpunten over de panels.
+  + We voegen meetpunten toe aan de verschillende panels volgens grts_ranking_draw.
+
+```{r}
+selection_planning <- selection %>%
+  filter(point_status == "selected_cycle2") %>%
+  arrange(rank_rel_main_type_sc2) %>%
+  mutate(jaar_opname_c1 = year(measurement_date))
+
+create_panels <- function(sampling_units = selection_type, nb_panels = 3, nb_years = 6, min_diff_years = 4, max_diff_years = 8, startyear_cycle = 2022, endyear_cycle = 2027) {
+  
+  sampling_units <- sampling_units %>%
+      group_by(type, sac, measured_cycle1) %>%
+  mutate(n_selected = n(),
+         rank_used = ifelse(measured_cycle1,
+                            rank(rank(grts_ranking_draw) + 100000 * jaar_opname_c1),
+                            rank(grts_ranking_draw)),
+         jaar_opname_c2 = ceiling((rank_used - runif(1)) / n_selected  * nb_years) + startyear_cycle - 1
+        )  %>%
+  ungroup() %>%
+    mutate(jaar_opname_c2 = ifelse(measured_cycle1,
+                                   ifelse(jaar_opname_c2 > (jaar_opname_c1 + max_diff_years), 
+                                          jaar_opname_c1 + max_diff_years,
+                                          ifelse(jaar_opname_c2 < (jaar_opname_c1 +  min_diff_years), 
+                                                 jaar_opname_c1 +  min_diff_years,
+                                                 jaar_opname_c2)),
+                                   jaar_opname_c2),
+      verschil_jaar = jaar_opname_c2 - jaar_opname_c1,
+      panel = ceiling((jaar_opname_c2 - startyear_cycle + 1) / nb_years * nb_panels),
+      panel = ifelse(measured_cycle1, panel, NA),
+      jaar_opname_c2 = ifelse(measured_cycle1, jaar_opname_c2, NA)) %>%
+  group_by(type, sac) %>%
+  mutate(n_selected = n(),
+         n_panel1_measured = sum(panel == 1, na.rm = TRUE),
+         n_panel2_measured  = sum(panel == 2, na.rm = TRUE),
+         n_panel3_measured  = sum(panel == 3, na.rm = TRUE),
+         panel_temp = ceiling((rank(grts_ranking_draw) - runif(1)) / n_selected  * nb_panels),
+         n_panel1_needed = max(0, sum(panel_temp == 1, na.rm = TRUE) - n_panel1_measured),
+         n_panel2_needed  = max(0, sum(panel_temp == 2, na.rm = TRUE) - n_panel2_measured) + n_panel1_needed,
+         n_panel3_needed  = max(0, sum(panel_temp == 3, na.rm = TRUE) - n_panel3_measured) + n_panel2_needed)  %>%
+  ungroup() %>%
+  group_by(type, sac, measured_cycle1) %>%
+  mutate(panel = ifelse(measured_cycle1, panel,
+                        ifelse(rank(grts_ranking_draw) <= n_panel1_needed, 1,
+                                ifelse(rank(grts_ranking_draw) <= n_panel2_needed, 2, 
+                                        ifelse(rank(grts_ranking_draw) <= n_panel3_needed, 3, NA))))) %>%
+    ungroup() %>%
+    select(-n_panel1_measured, -n_panel2_measured, -n_panel3_measured, -panel_temp, -n_panel1_needed, -n_panel2_needed, -n_panel3_needed)
+  
+  return(sampling_units)
+  
+}
+
+selection_panels <- create_panels(sampling_units = selection_planning) 
+
+
+ n_panel <- selection_panels %>%
+    group_by(main_type, panel) %>%
+    summarise(n = n(),
+              n_measured = sum(measured_cycle1),
+              n_notmeasured = sum(!measured_cycle1),
+              min_verschil = min(verschil_jaar, na.rm = TRUE),
+              max_verschil = max(verschil_jaar, na.rm = TRUE)) %>%
+    ungroup()
+    
+  
+sampling_units_panels <- selection_panels %>%
+  select(point_code, legacy_site, main_type, type, phab, polygon_id, sac, grts_ranking, grts_ranking_draw, measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord) %>%
+  left_join(select(mhq_terr_measurements, point_code, measurement_date, point_code, type, db_ref, recording_givid), by = c("point_code", "measurement_date", "type"))
+```
+
+Onderstaande tabel geeft de verdeling van de meetpunten weer over de verschillende panels en het minimum en maximum verschil in jaren t.o.v. opeenvolgende metingen.
+
+```{r}
+n_panel %>%
+ # filter(!main_type %in% c("2160", "2180")) %>%
+  datatable(rownames = FALSE)
+```
+
+# Selectie meetpunten afwerkingen 1ste meetcyclus voor 2180 en 2160 
+
+```{r}
+selectie_meetpunten_2180_2160 <- selection_scenarios %>%
+  filter(type %in% c("2160", "2180")) %>%
+  filter(!measured_cycle1) %>%
+  mutate(n_todo = ceiling(n_total_main_type - n_measured_valid)) %>%
+  group_by(main_type, sac) %>%
+  mutate(rank_rel = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  mutate(selected_main_type = rank_rel <= n_todo,
+         reserve_main_type = (rank_rel > n_todo) & (rank_rel <= n_todo + 5)) %>%
+  filter(selected_main_type | reserve_main_type) %>%
+  select(point_code, legacy_site, main_type, type, phab, polygon_id, sac, grts_ranking, grts_ranking_draw, selected_main_type, reserve_main_type,  x_coord, y_coord, n_todo) %>%
+  arrange(type, sac, grts_ranking_draw)
+
+```
+
+
+# Selectie vervangpunten
+
+Wanneer een meetpunt niet geschikt blijkt, moet dit meetpunt vervangen worden door een andere steekproefeenheid binnen dezelfde habitatpolygoon. In uitzondering hierop zijn de langer bestaande meetpunten zoals de PINK-PQ's.
+
+Als potentiële vervangpunten selecteren we alle steekproefeenheden in een vierkante buffer van 7 x 7 gridcellen rond het meetpunt die binnen dezelfde habitatpolygoon gelegen zijn. 
+
+Voor kleine polygonen zal dit maar een beperkt aantal vervangpunten opleveren. Daarom selecteren we voor polygonen met minder dan 50 steekproefeenheden en minder dan 10 steekproefeenheden in de vierante buffer, alle steekproefeenheden als bijkomende potentiële vervangpunten. 
+
+Elk vervangpunt krijgt een rangnummer overeenkomstig de relatieve rangschikking:
+
++ volgens grts_ranking binnen de polygoon (één rangnummer per punt)
++ binnen de buffer (meerdere rangnummers per punt mogelijk als de buffers van verschillende punten overlappen) 
+
+De steekproefeenheid met de laagste ranking in de buffer rond het meetpunt wordt geselecteerd als vervangpunt. 
+
+Let wel buffers van verschillende meetpunten kunnen overlappen. Zorg er dus voor dat er geen vervangpunt wordt geselecteerd dat al eens is gebruikt als vervangpunt.
+
+
+```{r}
+habitatmap_terr <- read_habitatmap_terr()
+terr_refpoints <- read_vc("mhq_terr_refpoints", data_path)
+
+no_habitat <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(no_habitat)
+
+inaccessible_not_measurable <- terr_assessments %>%
+    left_join(terr_refpoints, by = "point_code") %>%
+    filter(is_centroid) %>%
+    filter(inaccessible == "long term" | not_measurable == "long term")
+
+polygons_habitatmap <- habitatmap_terr$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% sampling_units_panels$polygon_id)
+
+grts_habmap <- read_vc(file = "design-strategy/output/samplingframe_habitatterr_points", root = fileman_up("n2khab-mhq-design"))
+
+su_sf <- sampling_units_panels %>%
+  filter(!legacy_site) %>%
+  filter(!measured_cycle1) %>%
+  mutate(x_coord = round(x_coord, 1),
+         y_coord = round(y_coord, 1)) %>%
+  distinct(polygon_id, point_code, x_coord, y_coord) %>%
+  st_as_sf(coords = c("x_coord", "y_coord"), crs = 31370)
+
+for(i in 1:nrow(su_sf)) {
+  
+  pol_id <- (su_sf %>%
+    slice(i))$polygon_id
+  
+  p_code <- (su_sf %>%
+    slice(i))$point_code
+  
+  point <- su_sf %>%
+    slice(i) %>%
+    buffer_square(length = 200) %>%
+    st_as_sf() %>%
+    mutate(polygon_id_vervang = pol_id,
+           point_code_vervang = p_code)
+  
+  if(i == 1) {
+    
+    buffers <- point
+    
+  } else {
+    buffers <- bind_rows(buffers,
+                         point)
+  }
+  
+}
+
+st_crs(buffers) <- 31370
+
+
+# buffers_all <- buffers %>%
+#   mutate(buffer = "ja") %>%
+#   group_by(buffer) %>%
+#   summarise(n  = n()) %>%
+#   ungroup()
+
+polygonen_point_code <- su_sf %>%
+  st_drop_geometry() %>%
+  group_by(polygon_id) %>%
+  summarise(point_code_inpolygon = str_c(point_code, collapse = ";")) %>%
+  ungroup()
+
+vervangpunten <- grts_habmap %>%
+  mutate(grts_ranking_draw = grts_ranking) %>%
+  semi_join(su_sf, by = "polygon_id") %>%
+  anti_join(sampling_units_panels, by = "grts_ranking") %>%
+  anti_join(sampling_units_panels, by = "grts_ranking_draw") %>%
+  anti_join(no_habitat, by = "grts_ranking") %>%
+  anti_join(inaccessible_not_measurable, by = "grts_ranking") %>%
+  group_by(polygon_id) %>%
+  mutate(n_polygon = n_distinct(grts_ranking)) %>%
+  ungroup() %>%
+  st_as_sf(coords= c("x", "y"), crs = 31370) %>%
+  st_join(buffers) %>%
+  filter((polygon_id == polygon_id_vervang) | is.na(polygon_id_vervang)) %>%
+  group_by(polygon_id) %>%
+  mutate(n_buffer = sum(!is.na(polygon_id_vervang))) %>%
+  ungroup() %>%
+  filter((!is.na(polygon_id_vervang)) | (n_buffer <= 10 & n_polygon < 50) ) %>%
+  group_by(polygon_id) %>%
+  mutate(rank_rel_polygon = rank(grts_ranking, ties.method = "min")) %>%
+  ungroup() %>%
+  group_by(polygon_id, point_code_vervang) %>%
+  mutate(rank_rel_buffer = ifelse(!is.na(point_code_vervang), rank(grts_ranking), NA)) %>%
+  ungroup() %>%
+  select(polygon_id, point_code_vervang, grts_ranking, rank_rel_polygon, rank_rel_buffer, n_buffer, n_polygon) %>%
+  left_join(polygonen_point_code, by = "polygon_id") %>%
+  mutate(point_code_vervang = ifelse(is.na(point_code_vervang), point_code_inpolygon, point_code_vervang)) %>%
+  separate_rows(point_code_vervang, sep = ";") %>%
+  select(-point_code_inpolygon)
+
+
+check <- vervangpunten %>%
+  filter(is.na(rank_rel_buffer)) %>%
+  filter(str_detect(point_code_vervang, ";")) %>%
+  separate_rows(point_code_vervang, sep = ";")
+```
+
+Hieronder een voorbeeld van een kleine polygoon: 
+
++ kijk eerst of er een geschikt meetpunt is in de buffer (gele punten) rond het meetpunt (rood punt)
++ zo niet selecteer een van de overige meetpunten (blauwe punten)
+
+```{r}
+
+p_id <- "538098_v2018"
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id == p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+vervangpunten %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(is.na(rank_rel_buffer), "blue", "yellow")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(data = sampling_unit, color = "red") %>%
+  addPolygons(data = polygon ) %>%
+  addCircleMarkers(color = ~show_color, label = ~str_c("buffer: ", ifelse(is.na(rank_rel_buffer), "niet in buffer", rank_rel_buffer), "; polygon: ", rank_rel_polygon), labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+```
+
+Onderstaand voorbeeld toont overlappende buffers.
+
+```{r}
+
+p_id <- "013649_v2020"
+
+
+sd <- vervangpunten %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+sd <- SharedData$new(sd)
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id == p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+    sd %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = polygon ) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
+      addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+  )
+)
+  
+  
+```
+
+
+Onderstaand voorbeeld toont een grote polygoon.
+
+```{r}
+
+p_id <- "645479_v2020"
+
+
+sd <- vervangpunten %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+sd <- SharedData$new(sd)
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id == p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+    sd %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = polygon ) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
+      addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+  )
+)
+  
+  
+```
+
+
+```{r}
+
+p_id <- c("638515_v2014", "638283_v2014")
+
+
+sd <- vervangpunten %>%
+  filter(polygon_id %in% p_id) %>%
+  st_transform(4326) 
+
+sd <- SharedData$new(sd)
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id %in% p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id %in% p_id) %>%
+  st_transform(4326) 
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+    sd %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = polygon ) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
+      addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+  )
+)
+  
+  
+```
+
+
+# Resultaten wegschrijven
+
+```{r, eval= TRUE}
+# sampling_units_panels <- selection_panels %>%
+#   select(point_code, legacy_site, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw,  measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, panel, jaar_opname_c2, x_coord, y_coord)
+
+write.csv2(sampling_units_panels, "../output/mhq_terr_cycle2.csv")
+
+reserve <- selection %>%
+  filter(point_status != "selected_cycle2") %>%
+  select(point_status, legacy_site, point_code, main_type, type, phab, polygon_id, source_bwk, sac, grts_ranking, grts_ranking_draw, measured_cycle1, measurement_date, selected_main_type = selected_main_type_sc2, selected_subtype = selected_subtype_sc2, rank_rel_main_type = rank_rel_main_type_sc2, rank_rel_subtype = rank_rel_subtype_sc2, x_coord, y_coord)
+  
+write.csv2(reserve, "../output/mhq_terr_reserve.csv")
+
+
+nieuwe_meetpunten <- selection_panels %>%
+  filter(!measured_cycle1)
+
+vervangpunten_out <- vervangpunten %>%
+  mutate(x_coord = st_coordinates(vervangpunten)[,1],
+         y_coord = st_coordinates(vervangpunten)[,2]) %>%
+  filter(point_code_vervang %in% nieuwe_meetpunten$point_code) %>%
+  arrange(polygon_id, point_code_vervang) %>%
+  st_drop_geometry() %>%
+  select(-n_buffer, - n_polygon)
+
+write.csv2(vervangpunten_out, "../output/mhq_terr_vervangpunten.csv")
+```
+
+## ANB: 6510 en heide
+
++ lijst meetpunten: 'mhq_terr_cyclus2_anb.csv'
+
+```{r}
+sampling_units_panels_anb <- sampling_units_panels %>%
+  filter(main_type %in% c("6510", "2310", "2330", "4010", "4030")) %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt", "nieuw meetpunt"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  arrange(panel, grts_ranking_draw)
+
+write_csv2(sampling_units_panels_anb, "../output/mhq_terr_cyclus2_anb.csv", na = "")
+
+sampling_units_panels_anb %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+
+
+```
+
++ vervangpunten: 'mhq_terr_vervangpunten_anb.csv'
+
+```{r}
+vervangpunten_anb <- vervangpunten_out %>%
+  semi_join(sampling_units_panels_anb, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
+
+write_csv2(vervangpunten_anb, "../output/mhq_terr_vervangpunten_anb.csv", na = "")
+
+vervangpunten_anb %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
+
++ reservepunten en niet weerhouden opnames uit 1ste meetcyclus: 'mhq_terr_reserve_anb.csv'
+
+```{r}
+reserve_anb <- reserve %>%
+  filter(main_type %in% c("6510", "2310", "2330", "4010", "4030")) %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt (niet weerhouden voor cyclus 2)", "nieuw meetpunt (reserve)"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  arrange(type_meetpunt, grts_ranking_draw)
+
+write_csv2(reserve_anb, "../output/mhq_terr_reserve_anb.csv", na = "")
+
+reserve_anb %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
+
+
+## INBO: graslanden en moerassen
+
+
++ lijst meetpunten: 'mhq_terr_cyclus2_inbo.csv'
+
+```{r}
+sampling_units_panels_inbo <- sampling_units_panels %>%
+  filter(! main_type %in% c("6510", "2310", "2330", "4010", "4030")) %>%
+  filter(str_sub(main_type, 1, 2) != "21") %>%
+  filter(type != "1330_da") %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt", "nieuw meetpunt"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y, db_ref, recording_givid) %>%
+  arrange(panel, grts_ranking_draw)
+
+write_csv2(sampling_units_panels_inbo, "../output/mhq_terr_cyclus2_inbo.csv", na = "")
+
+sampling_units_panels_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+
+
+```
+
++ vervangpunten: 'mhq_terr_vervangpunten_inbo.csv'
+
+```{r}
+vervangpunten_inbo <- vervangpunten_out %>%
+  semi_join(sampling_units_panels_inbo, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
+
+write_csv2(vervangpunten_inbo, "../output/mhq_terr_vervangpunten_inbo.csv", na = "")
+
+vervangpunten_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
+
++ reservepunten en niet weerhouden opnames uit 1ste meetcyclus: 'mhq_terr_reserve_inbo.csv'
+
+```{r}
+reserve_inbo <- reserve %>%
+  filter(! main_type %in% c("6510", "2310", "2330", "4010", "4030")) %>%
+  filter(str_sub(main_type, 1, 2) != "21") %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt (niet weerhouden voor cyclus 2)", "nieuw meetpunt (reserve)"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, datum_opname_cyclus1 = measurement_date, x, y) %>%
+  arrange(type_meetpunt, grts_ranking_draw)
+
+write_csv2(reserve_inbo, "../output/mhq_terr_reserve_inbo.csv", na = "")
+
+reserve_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
+
+
+
+## INBO: duinen
+
+### Meetcyclus 2 
+
++ lijst meetpunten: 'mhq_terr_cyclus2_duinen_inbo.csv'
+
+```{r}
+sampling_units_panels_duinen_inbo <- sampling_units_panels %>%
+  filter(str_sub(main_type, 1, 2) == "21") %>%
+  mutate(type_meetpunt = ifelse(measured_cycle1, "bestaand meetpunt", "nieuw meetpunt"),
+         uitvoer_opname = ifelse(selected_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(panel, point_code, polygon_id, grts_ranking_draw, sbz = sac, hoofdtype = main_type, habitattype = type, phab, type_meetpunt, uitvoer_opname, datum_opname_cyclus1 = measurement_date, x, y, db_ref, recording_givid) %>%
+  arrange(panel, grts_ranking_draw)
+
+write_csv2(sampling_units_panels_duinen_inbo, "../output/mhq_terr_cyclus2_duinen_inbo.csv", na = "")
+
+sampling_units_panels_duinen_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+
+
+```
+
+
+### Afwerking meetcyclus 2 voor 2160 en 2180
+
+
+```{r, eval = FALSE}
+selectie_duinen_2180_2160 <- selectie_meetpunten_2180_2160 %>%
+  mutate(type_meetpunt = ifelse(selected_main_type, "selectie", "reserve"),
+         pink_pq = ifelse(legacy_site, "ja", "nee"),
+         x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(type_meetpunt, pink_pq, point_code, polygon_id, grts_ranking_draw, sbz = sac, habitattype = type, phab, x, y, n_todo) %>%
+  arrange(habitattype, sbz, grts_ranking_draw)
+
+write_csv2(selectie_duinen_2180_2160, "../output/mhq_terr_cyclus1_2160_2180_inbo.csv", na = "")
+
+```
+
+
+### Vervangpunten
+
++ vervangpunten: 'mhq_terr_vervangpunten_duinen_inbo.csv'
+
+```{r}
+vervangpunten_duinen_inbo <- vervangpunten_out %>%
+  semi_join(sampling_units_panels_duinen_inbo, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
+
+# vervangpunten_duinen_inbo2 <- vervangpunten_out %>%
+#   semi_join(selectie_duinen_2180_2160, by = "polygon_id") %>%
+#   mutate(x = round(x_coord, 2),
+#          y = round(y_coord, 2)) %>%
+#   select(-x_coord, -y_coord)
+# 
+# vervangpunten_duinen_inbo <- bind_rows(vervangpunten_duinen_inbo1,
+#                                         vervangpunten_duinen_inbo2) %>%
+#   unique()
+
+check <- vervangpunten_duinen_inbo %>%
+  group_by(point_code_vervang, rank_rel_buffer, rank_rel_polygon) %>%
+  filter(n() > 1)
+
+# check2 <- selectie_duinen_2180_2160 %>%
+#  # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+#   filter(! point_code %in% vervangpunten_duinen_inbo$point_code_vervang)
+# 
+# check3 <- selectie_duinen_2180_2160 %>%
+#  # filter((type_meetpunt == "selectie") & (pink_pq == "nee")) %>%
+#   filter(grts_ranking_draw %in% vervangpunten_duinen_inbo$grts_ranking_draw)
+
+write_csv2(vervangpunten_duinen_inbo, "../output/mhq_terr_vervangpunten_duinen_inbo.csv", na = "")
+
+vervangpunten_inbo %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
+
+
+
+
+

@@ -1,0 +1,32 @@
+..generic:
+  git2rdata: 0.2.1
+  optimize: yes
+  NA string: NA
+  sorting: point_code
+  hash: a0cbf79c50432e3c825b118e77b40fd543a6b0ec
+  data_hash: 8f62627da50be7e15abf15eb5d080a73fb5056c3
+point_code:
+  class: character
+type_target:
+  class: character
+is_type_target:
+  class: logical
+type_observed:
+  class: character
+inaccessible:
+  class: character
+measurable:
+  class: logical
+assessment_date:
+  class: Date
+  origin: '1970-01-01'
+assessment_source:
+  class: character
+fieldwork_team:
+  class: character
+x:
+  class: numeric
+'y':
+  class: numeric
+segment_id:
+  class: character

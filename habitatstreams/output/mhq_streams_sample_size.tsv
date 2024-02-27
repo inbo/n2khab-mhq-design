@@ -1,0 +1,5 @@
+sac	catchment_area	length_3260	proportion_3260	n_finite	n_finite_stratum	version
+intersecting or downstream	< 10 km²	16777.451572533	13.2730111187907	150	20	v2014
+intersecting or downstream	> 10 km²	109625.302274189	86.7269888812093	150	130	v2014
+outside	< 10 km²	31611.3368962563	50.3661510934248	26	13	v2014
+outside	> 10 km²	31151.7216460174	49.6338489065752	26	13	v2014

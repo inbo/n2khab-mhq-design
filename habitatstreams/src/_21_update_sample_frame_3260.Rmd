@@ -1,0 +1,735 @@
+# Updating 3260 sampling frame
+
+We will update the old sampling frame for 3260 (that was based on 3260 map version 1.4). 
+The old sampling frame consists of points that represent the sampling units (100 meter river segments). 
+Each point is located in the most downstream part of the sampling unit. 
+We will start with selecting points each 100 meter for all rivers in Flanders so that when the 3260 map changes in the future, we do not need to select new points again.
+Of course we want to keep the the points in the old sample frame as quite a number of them have already been sampled and measured in the field. 
+So we will exclude the newly selected points that overlap with the old 3260 map and replace this with the points in the old sample frame.
+Finally we will select the points that overlay with the new version of the 3260 map resulting in the updated sampling frame.
+The stepwise procedure is explained below. 
+
+## Data import
+
+- Read new 3260 map (v1.7) and sample frame based on old 3260 map. See this [Google Drive folder](https://drive.google.com/drive/folders/1mZJH1vaED6s2BA-zQivn8Nrag9NZ4C9D).
+
+```{r}
+
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+
+map_3260_old <- read_sf("../data/habitatstreams/v1_4", "BasisbestandSteekproeftrekkingHT3260", crs = 31370)
+
+segmentpoints_3260_old <- read_vc(file = "sample_habitatstreams_v1_4", "../output")
+
+segmentpoints_3260_old_sf <- segmentpoints_3260_old %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) 
+```
+
+
+- Read Flemish Hydrological Atlas (VHA) with all river segments in Flanders. We use the version of VHA that was used to create habitatstreams v1.7: 201806. See this [Google Drive folder](https://drive.google.com/drive/folders/1ikEkf5N4ckWcyCMSgM1O_OgcZCFjX9B4).  
+
+```{r}
+vha <- read_sf("../data/VHA_201806", "Wlas", crs = 31370)
+```
+
+
+- Read sac
+
+```{r}
+sac <- read_admin_areas(dsn = "sac") %>%
+  dplyr::select(sac_code)
+```
+
+- Read grts
+
+```{r}
+grts_master <- read_GRTSmh()
+```
+
+## Create line segments from segmentpoints of the sample frame version 1.4
+
+- Based on teh segmentpoints we create linesegments that represent the sampling units (= 100 m river segment). 
+We do this by splitting the 3260 map at the location of the segmentpoints. 
+
+- The line segments measure not exactly 100 meter. When line segments are larger than 120 meter we reduce the length to exactly 100 meter.  
+
+```{r}
+
+split_lines <- function(lines_sf, maxdist, varname_id = "id") {
+  
+  #convert to dataframe with coordinates
+  points_df <- st_cast(lines_sf, to = "POINT") %>%
+  mutate(x_coord = st_coordinates(geometry)[,1],
+         y_coord = st_coordinates(geometry)[,2]) %>%
+  st_drop_geometry() %>%
+  mutate(cumdist = 0,
+         newpoint = FALSE) %>%
+    rename(id = varname_id)
+  
+  
+  
+  #calculate cumulative distance between consecutive points of the same line
+  for(i in 2:nrow(points_df)) {
+  
+    if (points_df[i, "id"] == points_df[i - 1, "id"]) {
+      
+      distance <- sqrt(
+        (points_df[i, "x_coord"] - points_df[i - 1, "x_coord"])^2 + 
+          (points_df[i, "y_coord"] - points_df[i - 1, "y_coord"])^2
+        )
+      points_df[i, "cumdist"] <- distance + points_df[i - 1, "cumdist"]
+    } 
+  }
+  
+  #define id of subsegment
+  points_df <- points_df %>%
+  mutate(id_split = floor(cumdist/maxdist))
+
+  #create new points to create segments with maximum distance = maxdist
+  add_points <- points_df %>% 
+    distinct(id, id_split) %>%
+    filter(id_split != 0) %>%
+    mutate(cumdist = id_split * maxdist,
+           newpoint = TRUE)
+ 
+  points_split_df <- bind_rows(points_df,
+                        add_points) %>%
+    arrange(id, cumdist)
+  
+ #calculate coordinates of new points
+  for(i in 2:nrow(points_split_df)) {
+    if(is.na(points_split_df$x_coord[i])) {
+      
+      dist1 <- points_split_df$cumdist[i] - points_split_df$cumdist[i-1] 
+      dist2 <- points_split_df$cumdist[i + 1] - points_split_df$cumdist[i - 1] 
+      prop <- dist1/dist2
+      points_split_df$x_coord[i] <- points_split_df$x_coord[i - 1] + (points_split_df$x_coord[i + 1] - points_split_df$x_coord[i - 1]) * prop
+      points_split_df$y_coord[i] <- points_split_df$y_coord[i - 1] + (points_split_df$y_coord[i + 1] - points_split_df$y_coord[i - 1]) * prop
+    }
+  }
+  
+  # the new points are also the end points of the previous subsegment 
+  newpoints <- points_split_df %>%
+    filter(newpoint) %>%
+    mutate(id_split = id_split - 1)
+
+  points_split_df <- points_split_df %>%
+    bind_rows(newpoints) %>%
+    arrange(id, id_split, cumdist)
+  
+  # data records
+  data_df <- points_df %>%
+    select(-cumdist, -id_split, -x_coord, -y_coord, -newpoint) %>%
+    unique()
+  
+  # convert back to linestring
+  points_split_sf <- points_split_df %>%
+    mutate(new_id = str_c(id, "_", id_split)) %>%
+    st_as_sf(coords = c("x_coord", "y_coord"), crs = st_crs(lines_sf)) %>%
+    group_by(id, new_id) %>%
+    summarise(do_union = FALSE) %>%
+    st_cast(to = "LINESTRING") %>%
+    ungroup() %>%
+    left_join(data_df, by = "id") %>%
+    rename(old_id = id) %>%
+    rename(id = new_id)
+  
+  return(points_split_sf)
+  
+}
+
+```
+
+```{r}
+vha_buffer <- st_buffer(vha, dist = 1)
+
+segmentpoints_3260_old_sf <- segmentpoints_3260_old %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  dplyr::rename(wl_code_old = wl_code) %>%
+  st_join(vha_buffer, join = st_nearest_feature)
+
+buf_all <- st_combine(st_buffer(segmentpoints_3260_old_sf, 0.1))
+parts_all <-  st_collection_extract(lwgeom::st_split(map_3260_old$geometry, buf_all),"LINESTRING")
+
+segments_3260_old <- st_as_sf(
+  data.frame(
+    id = 1:length(parts_all),
+    geometry = parts_all
+  )
+) %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  filter(segmentlength > 1)
+
+segments_3260_old_startpoint <- segments_3260_old %>%
+  st_startpoint() %>%
+  st_as_sf() %>%
+  st_join(segments_3260_old) %>%
+  st_join(st_buffer(segmentpoints_3260_old_sf, 1)) %>%
+  st_drop_geometry() %>%
+  select(-segmentlength) %>%
+  filter(!is.na(segment_id))
+
+check <- segments_3260_old_startpoint %>%
+  group_by(id) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+segments_3260_old2 <- segments_3260_old %>%
+  left_join(segments_3260_old_startpoint, by = c("id")) %>%
+  filter(!is.na(segment_id))
+
+segments_3260_old_makeshorter <- segments_3260_old2 %>%
+  filter(segmentlength > 120) %>%
+  split_lines(maxdist = 100) %>%
+  filter(str_sub(id, start = -1) == "0") %>%
+  mutate(segmentlength = st_length(geometry)) %>%
+  select(-id) %>%
+  rename(id = old_id)
+
+segments_3260_1_4 <- segments_3260_old2 %>%
+  filter(segmentlength <= 120) %>%
+  rbind(segments_3260_old_makeshorter) %>%
+  mutate(river_name = str_to_lower(river_name)) %>%
+  select(segment_id, sample_id, type, sac, catchment_area, wl_code_old, wl_code = WTRLICHC, grts_ranking, river_name, sample)
+
+segmentpoints_3260_1_4 <- segmentpoints_3260_old_sf %>%
+  mutate(river_name = str_to_lower(river_name)) %>%
+  select(segment_id, sample_id, type, sac, catchment_area, wl_code_old, wl_code = WTRLICHC, grts_ranking, river_name, sample)
+
+# st_write(segments_3260_old2, "../output/segments_3260.gpkg", "segments_3260_1_4")
+# st_write(segmentpoints_3260_old_sf, "../output/segments_3260.gpkg", "segmentspoints_3260_1_4")
+
+check1 <- segments_3260_1_4 %>%
+  group_by(segment_id) %>%
+  mutate(nseg = n()) %>%
+  filter(nseg > 1)
+
+# --> 4 samenvloeiingen
+
+
+```
+
+## Select points that represent 100m sampling units on all rivers in Flanders
+
+- select points on line segments in vha every 100 meters
+
+- we exclude vha segment points tha overlap with the line segments of the 3260 sample frame version 1.4 
+
+```{r}
+vha_length <- sum(vha$LENGTE)
+
+segmentpoints_vha <- spsample(as_Spatial(vha),
+                          n = ceiling(vha_length/100),
+                          type="regular",
+                          cellsize=100,
+                          offset=0)
+                              
+segmentpoints_vha$name <- over(segmentpoints_vha, as_Spatial(vha_buffer))$NAAM
+segmentpoints_vha$wl_code <- over(segmentpoints_vha, as_Spatial(vha_buffer))$WTRLICHC
+segmentpoints_vha$vhas <- over(segmentpoints_vha, as_Spatial(vha_buffer))$VHAS
+segmentpoints_vha$oidn <- over(segmentpoints_vha, as_Spatial(vha_buffer))$OIDN
+
+segmentpoints_vha <- segmentpoints_vha %>%
+  as("sf")
+
+st_crs(segmentpoints_vha) <- st_crs(vha)
+
+#st_write(segmentpoints_vha, "../output/segmentpoints_vha", "segmentpoints_vha", driver = "ESRI Shapefile")
+```
+
+
+
+
+
+
+
+- Next we select the points that are not within the old map of 3260 (version 1.4), because for this old map we have already selected points every 100 meter and we want to keep the previously selected points.
+
+- We also want to avoid that the newly selected point on the vha linestrings are closer than 100 meter to the previously selected points when both are in the same waterbody. 
+We take a (linear) buffer of 50 meter along the previously selected points. So to avoid to much complexity, we do not calculate distances along the river linestrings. 
+We leave out the newly selected points that are within a buffer of a previuosly selected point that is located within the same waterbody (defined bij wl_code).
+
+- Note that the wl_code assigned to the previously selected points are outdated and have to be updated based on an overlay with vha.
+
+```{r, eval = FALSE}
+
+vha_buffer <- st_buffer(vha, dist = 1) %>%
+  dplyr::select(wl_code = WTRLICHC)
+    
+segmentpoints_3260_old_buffer <- segmentpoints_3260_old_sf %>%
+  st_buffer(dist = 50) %>%
+  dplyr::select(segment_id, wl_code_buffer = wl_code)
+
+#st_write(segmentpoints_3260_old_buffer, "../output/check.gpkg", "segmentpoints_3260_old_buffer", driver = "GPKG")
+
+map_3260_old_buffer <- map_3260_old %>%
+  st_buffer(dist = 1) %>%
+  dplyr::select(wl_code_old_3260 = WLcode)
+
+vha_overlay <- segmentpoints_vha %>%
+  mutate(id = str_c("new_", 1:nrow(.))) %>%
+  st_join(map_3260_old_buffer) %>%
+  mutate(in_map_3260_old = !is.na(wl_code_old_3260),
+         x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2],
+         grts_ranking = grts_master[as(., "Spatial")]) %>%
+  # group_by(id) %>%
+  # mutate(dist_to_segmentpoints_old = min(drop_units(st_distance(geometry, segmentpoints_3260_old_sf)))) %>%
+  # ungroup() %>%
+  st_join(sac) %>%
+  st_join(segmentpoints_3260_old_buffer) 
+  
+#st_write(vha_overlay, "../output/vha_overlay", "vha_overlay", driver = "ESRI Shapefile")
+
+vha_overlay_df <- vha_overlay %>%
+  st_drop_geometry()
+
+vha_difference <- vha_overlay_df %>%
+  filter((!in_map_3260_old) | (in_map_3260_old & is.na(wl_code_buffer)))  %>%
+  mutate(check = wl_code != wl_code_buffer)
+
+
+vha_difference_buffer <- vha_difference %>%
+  group_by(id, name, wl_code, sac_code, grts_ranking, x, y) %>%
+  summarise(within_100mbuffer_3260_old = sum(wl_code == wl_code_buffer, na.rm = TRUE) > 0) %>%
+  ungroup() %>%
+  filter(!within_100mbuffer_3260_old) 
+
+```
+
+
+```{r}
+segments_3260_1_4_buffer <- st_buffer(segments_3260_1_4, 5) %>%
+  select(segment_id, segments_3260_wl_code = wl_code)
+
+vha_difference <- segmentpoints_vha %>%
+  mutate(id = str_c("new_", 1:nrow(.))) %>%
+  st_join(segments_3260_1_4_buffer) %>%
+  filter(is.na(segment_id) | (wl_code != segments_3260_wl_code)) %>%
+  mutate(x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2],
+         river_name = str_to_lower(name),
+         grts_ranking = grts_master[as(., "Spatial")]) %>%
+   st_drop_geometry() %>%
+  select(id,  wl_code,   grts_ranking, x, y, river_name)
+  
+#st_write(vha_difference, "../output/check2", "vha_difference", driver = "ESRI Shapefile", delete_layer = TRUE)
+
+
+
+```
+
+
+- Next we combine the newly selected vha points with the previously selected point on the old 3260 map. We also add the strata information (position relative to sac) that is part of the old 3260 map.
+
+- Finally we assign a grts-ranking to each vha point based on to the grts-master
+
+```{r}
+map_3260_old_strata <- map_3260_old %>%
+  mutate(sac_old = ifelse(SBZ == "sa", "downstream",
+                          ifelse(SBZ == "intersect SBZ", "intersect",
+                                 ifelse(SBZ == "buiten", "outside", NA)))) %>%
+  dplyr::select(sac_old, naam) %>%
+  st_buffer(dist = 1) 
+  # st_join(sac, largest = TRUE) %>%
+  # rename(sac_code_segment = sac_code)
+
+vha_segmentpoints_combined <- segmentpoints_3260_1_4 %>%
+  st_join(map_3260_old_strata, largest = TRUE) %>%
+  mutate(id = str_c("old_", segment_id),
+         x = st_coordinates(.)[,1],
+         y = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  select(id,  wl_code, wl_code_old, sac_old, grts_ranking, x, y, river_name) %>%
+  bind_rows(vha_difference)
+  
+vha_segmentpoints_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_write(dsn = "../output/vha_segmentpoints_combined.gpkg", "vha_segmentpoints_combined", driver ="GPKG")
+```
+
+## Check if points are located within Flanders and overlap with grts-master  
+
+
+```{r}
+
+flanders <- read_admin_areas()
+
+streams_segmentpoints_no_ranking <- vha_segmentpoints_combined %>%
+  filter(is.na(grts_ranking)) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(flanders) %>%
+  mutate(in_flanders = !is.na(name),
+         color_in_flanders = ifelse(in_flanders, "blue", "red"))
+
+overview_missing_ranking <-  vha_segmentpoints_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(flanders) %>%
+  st_drop_geometry() %>%
+  mutate(in_flanders = !is.na(name),
+         in_grts_master = !is.na(grts_ranking)) %>%
+  group_by(in_flanders, in_grts_master) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+grts_border <- grts_master %>%
+  mask(st_buffer(streams_segmentpoints_no_ranking, 32)) %>%
+  rasterToPolygons() %>%
+  st_as_sf()
+
+n_flanders_missing <- (overview_missing_ranking %>%
+  filter(in_flanders, !in_grts_master))$n
+
+n_flanders_tot <- (overview_missing_ranking %>%
+  filter(in_flanders))$n %>%
+  sum()
+
+percent_flanders_missing <- round(n_flanders_missing/n_flanders_tot * 100, 2)
+
+```
+
+The table below gives an overview of the location of the vha points. `r n_flanders_missing` vha points are located within Flanders but do not overlap with the grts master. 
+This is because the grts master only contains cells for which the centroid is located within Flanders. 
+Therefore some parts of Flanders at the borders are not covered by the grts master. 
+However, only `r percent_flanders_missing` % of vha points within Flanders do not overlap with the grts master.     
+
+```{r}
+overview_missing_ranking %>%
+  kable() %>%
+  kable_styling()
+```
+
+The map below show the vha points that do not overlap with the grts master. 
+The points outside Flanders are red. 
+The cells within a distance of 32 meter of the vha points are shown as well (zoom in to see them).
+
+```{r}
+streams_segmentpoints_no_ranking %>%
+  st_transform(crs = 4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(color = ~color_in_flanders) %>%
+  addPolygons(data = st_transform(grts_border, crs = 4326)) %>%
+  addPolygons(data = st_transform(flanders, crs = 4326), fill = FALSE, color = "black")
+```
+
+
+## Create updated sample frame for 3260
+
+We create an updated sample frame for 3260 by selecting the points that intersect with a buffer of 5 meter around the new 3260 habitatmap (v1.7). 
+
+We also want to include points that do not intersect but for which the 100 m segment will contain 3260 habitat according to the habitatmap. 
+Remember that the points represent the most downstream location of each 100 m segment. 
+So we only want to select (not intersecting points) that are located (less than 100 meter) downstream of 3260 habitat. 
+We do this by creating a buffer of 75 meter around the starting points of each linestring in the habitatmap (these starting points are normally the most downstream location of the linesegment) and than selecting all points that intersect with the buffer and have the same wl_code (to avoid selectin points in other streams). 
+
+```{r, eval= FALSE}
+
+map_3260_new_sac <- map_3260_new %>%
+  st_buffer(10) %>%
+  dplyr::select(SBZ)
+
+segmentpoints_3260_new_intersect <- vha_segmentpoints_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(map_3260_new_sac, largest = TRUE) %>%
+  filter(!is.na(SBZ))
+
+map_3260_new_startpoint_buffer <- st_startpoint(map_3260_new) %>%
+  st_as_sf() %>%
+  mutate(id_temp = 1:nrow(.)) %>%
+  st_join(map_3260_new) %>%
+  st_join(vha_buffer) %>%
+  st_buffer(dist = 75) %>%
+  dplyr::select(SBZ, wl_code_extra = wl_code) %>%
+  group_by(SBZ, wl_code_extra) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+segmentpoints_3260_new_extra <- vha_segmentpoints_combined %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(map_3260_new_startpoint_buffer, largest = TRUE) %>%
+  filter(!is.na(SBZ)) %>%
+  filter(wl_code == wl_code_extra) %>%
+  filter(!(id %in% segmentpoints_3260_new_intersect$id))
+
+check <- segmentpoints_3260_new_extra %>%
+  st_drop_geometry() %>%
+  group_by(id) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+segmentpoints_3260_new <- segmentpoints_3260_new_extra %>%
+  dplyr::select(-wl_code_extra, -n) %>%
+  rbind(segmentpoints_3260_new_intersect) %>%
+  mutate(sac = ifelse(SBZ %in% c("sa", "intersect SBZ"), "intersecting or downstream",
+                      ifelse(SBZ %in% c("buiten"), "outside", NA)),
+         catchment_area = ifelse(str_sub(wl_code, 1, 2) %in% c("VL", "L1"), "> 10 km²",
+                                  ifelse(str_sub(wl_code, 1, 2) == "L2",  "< 10 km²", "< 10 km²"))) %>%
+  dplyr::select(segment_code = id, river_name = name, wl_code, wl_code_old, grts_ranking, sac, catchment_area)
+```
+
+
+```{r}
+map_3260_new_buffer <- map_3260_new %>%
+  st_buffer(75) %>%
+  select(OBJECTID_1)
+
+vha_3260 <- vha %>%
+  st_join(map_3260_new_buffer, largest = TRUE) %>%
+  filter(!is.na(OBJECTID_1))
+
+map_3260_sac <- map_3260_new %>%
+  st_buffer(1) %>%
+  select(sac_streams = SBZ)
+
+segmentpoints_potential <- vha_segmentpoints_combined %>%
+  st_as_sf(coords = c("x", "y"), crs =31370) %>%
+  st_join(map_3260_new_buffer, largest = TRUE) %>%
+  filter(!is.na(OBJECTID_1))
+
+buf_all <- st_combine(st_buffer(segmentpoints_potential, 1))
+parts_all <-  st_collection_extract(lwgeom::st_split(vha_3260$geometry, buf_all),"LINESTRING")
+
+segments_3260_new <- st_as_sf(
+  data.frame(
+    id_temp = 1:length(parts_all),
+    geometry = parts_all
+  )
+) %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  filter(segmentlength > 10)
+
+segments_3260_new_startpoint <- segments_3260_new %>%
+  st_startpoint() %>%
+  st_as_sf(crs = 31370) %>%
+  st_join(segments_3260_new) %>%
+  st_join(segmentpoints_potential, join = st_nearest_feature) %>%
+  group_by(id) %>%
+  mutate(dist = min(drop_units(st_distance(geometry, segmentpoints_potential)))) %>%
+  ungroup() %>%
+  filter(dist < 10)
+  st_drop_geometry() %>%
+  select(-segmentlength) %>%
+  filter(!is.na(id))
+
+segments_3260_new2 <- segments_3260_new %>%
+  left_join(segments_3260_new_startpoint, by = c("id_temp")) %>%
+  filter(!is.na(id))
+
+segments_toolong <- segments_3260_new2 %>%
+  filter(segmentlength > 120)
+
+buf_all <- st_combine(st_buffer(segmentpoints_potential, 10))
+parts_all <-  st_collection_extract(lwgeom::st_split(segments_toolong$geometry, buf_all),"LINESTRING")
+
+split_segments_toolong <- st_as_sf(
+  data.frame(
+    id_temp2 = 1:length(parts_all),
+    geometry = parts_all
+  )
+) %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  filter(segmentlength > 30)
+
+split_segments_startpoint <- split_segments_toolong %>%
+  st_startpoint() %>%
+  st_as_sf() %>%
+  st_join(split_segments_toolong) %>%
+  st_join(st_buffer(segmentpoints_potential, 10), largest = TRUE) %>%
+  st_drop_geometry() %>%
+  filter(!is.na(id)) %>%
+  select(-segmentlength)
+
+split_segments_toolong2 <- split_segments_toolong %>%
+  left_join(split_segments_startpoint, by = "id_temp2") %>%
+  filter(!is.na(id))
+
+segments_3260_new_makeshorter <- split_segments_toolong2 %>%
+  filter(segmentlength > 120) %>%
+  split_lines(maxdist = 100) %>%
+  filter(str_sub(id, start = -1) == "0") %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  rename(id_new = id, id = old_id) %>%
+  select(-id_new)
+
+segments_3260_1_7 <- segments_3260_new2 %>%
+  filter(segmentlength < 120) %>%
+  bind_rows(filter(split_segments_toolong2, segmentlength < 120)) %>%
+  bind_rows(segments_3260_new_makeshorter) %>%
+  filter(segmentlength > 25) %>%
+  select(segment_id = id, wl_code, grts_ranking, river_name, segmentlength)
+
+segmentpoints_3260_1_7 <- segments_3260_1_7 %>%
+  st_startpoint() %>%
+  st_as_sf() %>%
+  st_join(segments_3260_1_7) %>%
+  st_join(map_3260_new_sac, join =  st_nearest_feature) %>%
+  rename(sac_streams = SBZ) %>%
+  mutate(sac_streams = ifelse(sac_streams %in% c("intersect SBZ", "sa"), "intersecting or downstream",
+                      ifelse(sac_streams == "buiten", "outside", NA))) %>%
+  unique()
+
+check <- segmentpoints_3260_1_7 %>%
+  group_by(segment_id) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+check <- segments_3260_1_7 %>%
+  st_drop_geometry() %>%
+  group_by(segment_id) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+
+
+
+```
+
+Some of the points have no grts-ranking yet, as they do not overlap with the grts master. 
+We keek the points in the sample frame when they are located within Flanders or when they are located in the Meuse.
+The Meuse forms part of the boundary between Flanders and the Netherlands and shifts from the Flemish shore to the Dutch shore as can be seen in the map above (when you zoom in). 
+Therefore we also want to keep the points in the Meuse that are located in the Netherlands because the actual border is located on the Flemish shore.
+We assign the grts-ranking of the closest cell to these points.
+
+```{r}
+segmentpoints_3260_border <- segmentpoints_3260_1_7 %>%
+  filter(is.na(grts_ranking))
+
+segmentpoints_3260_border_buffer <- segmentpoints_3260_border %>%
+  st_buffer(dist = 100)
+
+grts_border <- grts_master %>%
+  mask(segmentpoints_3260_border_buffer) %>%
+  rasterToPoints(spatial = TRUE) %>%
+  st_as_sf()
+
+st_crs(grts_border) <- 31370
+
+segmentpoints_3260_border_grts <- segmentpoints_3260_border %>%
+ st_join(grts_border, join = st_nearest_feature) %>%
+  st_join(flanders) %>%
+  select(-grts_ranking) %>%
+  rename(grts_ranking = GRTSmaster_habitats) %>%
+  filter(str_to_lower(river_name) == "maas") %>%
+  select(-name)
+
+segmentpoints_3260_new_addgrts <- segmentpoints_3260_1_7 %>%
+  filter(!is.na(grts_ranking)) %>%
+  bind_rows(segmentpoints_3260_border_grts) 
+
+sampleframe_3260_segmentpoints_1_7 <- segmentpoints_3260_new_addgrts %>%
+  mutate(x = st_coordinates(geometry)[,1],
+         y = st_coordinates(geometry)[, 2]) %>%
+  unique() %>%
+  mutate(segment_id = str_replace(segment_id, "old", "1_4"),
+         segment_id = str_replace(segment_id, "new", "1_7"),
+         x = round(x,2),
+         y = round(y, 2)) %>%
+  select(segment_id, grts_ranking, sac_streams, x, y) %>%
+  st_drop_geometry()
+
+check <- sampleframe_3260_segmentpoints_1_7 %>%
+  group_by(segment_id) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+sampleframe_3260_segments_1_7 <- segments_3260_1_7 %>%
+  select(segment_id) %>%
+    mutate(segment_id = str_replace(segment_id, "old", "1_4"),
+         segment_id = str_replace(segment_id, "new", "1_7")) %>%
+  filter(segment_id %in% sampleframe_3260_segmentpoints$segment_id) %>%
+  unique()
+
+check2 <- sampleframe_3260_segments_1_7 %>%
+  st_drop_geometry() %>%
+  group_by(segment_id) %>%
+  mutate(n = n()) %>%
+  ungroup()
+
+
+sampleframe_3260_segmentpoints_1_7 <- sampleframe_3260_segmentpoints_1_7 %>%
+  group_by(segment_id) %>%
+  mutate(n = n(),
+         nb = 1:n(),
+         segment_id = ifelse(n > 1, str_c(segment_id, "_", nb), segment_id)) %>%
+  ungroup() %>%
+  select(-n, -nb)
+
+sampleframe_3260_segments_1_7 <- sampleframe_3260_segments_1_7 %>%
+  group_by(segment_id) %>%
+  mutate(n = n(),
+         nb = 1:n(),
+         segment_id = ifelse(n > 1, str_c(segment_id, "_", nb), segment_id)) %>%
+  ungroup() %>%
+  select(-n, -nb) %>%
+  mutate(length_m = drop_units(st_length(geometry)),
+         length_m = round(length_m, 0)) %>%
+  select(segment_id, length_m, geometry)
+
+  
+
+# streams_segmentpoints_all <- vha_segmentpoints_combined %>%
+#   mutate(segment_id = str_replace(id, "old", "1_4"),
+#         segment_id = str_replace(segment_id, "new", "1_7") ,
+#         name = str_to_lower(name),
+#         x = round(x, 2),
+#         y = round(y, 2)) %>%
+#   dplyr::select(segment_id, grts_ranking, river_name = name, wl_code, x, y) 
+# 
+# check_unique_id <- streams_segmentpoints_all %>%
+#   group_by(segment_id) %>%
+#   mutate(n = n()) %>%
+#   ungroup() %>%
+#   filter(n > 1)
+```
+
+The segment starting points that form the sampling frame of 3260 is exported as a table named 'samplingframe_habitatstreams_v1_7'.
+Below we show some rows as an example.
+
+```{r}
+sampleframe_3260_segmentpoints_1_7 %>%
+  arrange(grts_ranking) %>%
+  head() %>%
+  kable() %>%
+  kable_styling()
+```
+
+The starting points of all vha segments are exported as a table named 'vha_segments', see some example rows below.
+
+```{r}
+# streams_segmentpoints_all %>%
+#   arrange(grts_ranking) %>%
+#   head() %>%
+#   kable() %>%
+#   kable_styling()
+```
+
+```{r}
+# write_vc(st_drop_geometry(sample_frame_3260), root =  "../output", file = "samplingframe_habitatstreams_v1_7", sorting = "segment_id", strict = FALSE)
+# 
+# st_write(sample_frame_3260, "../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_v1_7", driver = "GPKG", append = TRUE, delete_layer = TRUE)
+# 
+# streams_segmentpoints_all %>%
+#   write_vc(root =  "../output", file = "vha_segments", sorting = c("segment_id", "grts_ranking", "river_name"), strict = FALSE)
+```
+
+
+```{r}
+write_vc(sampleframe_3260_segmentpoints_1_7, root =  "../output", file = "samplingframe_habitatstreams_segmentpoints_v1_7", sorting = "segment_id", strict = FALSE)
+
+st_write(sampleframe_3260_segments_1_7, "../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_segments_v1_7", driver = "GPKG", delete_layer = TRUE)
+
+sampleframe_3260_segmentpoints_1_7 %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_write( "../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_segmentpoints_v1_7", driver = "GPKG", delete_layer = TRUE)
+# 
+# 
+```
+
+
+
+
+
+
+

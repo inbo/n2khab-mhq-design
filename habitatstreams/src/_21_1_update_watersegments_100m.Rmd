@@ -1,0 +1,104 @@
+# Integrate samplingframe_habitatstreams_v1_7 and watercourse_100mseg
+
+```{r}
+map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefvernieuwingHT3260_SBZ", crs = 31370)
+
+segmentpoints_samplingframe <- read_sf("../output/samplingframe_streams.gpkg", "samplingframe_habitatstreams_v1_7")
+
+path <- fileman_up("n2khab_data")
+db <- file.path(path, "20_processed/watercourse_100mseg/watercourse_100mseg.gpkg")
+
+watercourse_100mseg_lines <- read_sf(dsn = db, layer = "watercourse_100mseg_lines", crs = 31370)
+
+watercourse_100mseg_points <- read_sf(dsn = db, layer = "watercourse_100mseg_points", crs = 31370)
+```
+
+```{r}
+library(lwgeom)
+
+buf_all <- st_combine(st_buffer(segmentpoints_samplingframe, 0.1))
+parts_all <-  st_collection_extract(lwgeom::st_split(map_3260_new$geometry, buf_all),"LINESTRING")
+
+segments_samplingframe <- st_as_sf(
+  data.frame(
+    id = 1:length(parts_all),
+    geometry = parts_all
+  )
+)
+
+segments_samplingframe <- segments_samplingframe %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  filter(segmentlength > 1)
+  
+```
+
+```{r}
+segments_samplingframe_toolong <- segments_samplingframe %>%
+  filter(segmentlength > 110)
+
+buf_all_5 <- st_combine(st_buffer(segmentpoints_samplingframe, 5.1))
+
+parts_all <-  st_collection_extract(lwgeom::st_split(segments_samplingframe_toolong$geometry, buf_all_5),"LINESTRING")
+
+segments_samplingframe_toolong_split <- st_as_sf(
+  data.frame(
+    id = 1:length(parts_all),
+    geometry = parts_all
+  )
+) %>%
+  mutate(segmentlength = drop_units(st_length(geometry))) %>%
+  filter(segmentlength > 10)
+
+
+
+testsegment <- segments_samplingframe_toolong[2,]
+
+testsegment_split <- testsegment %>%
+  split_lines(max_length = 100, id = "id") %>%
+  mutate(segmentlength = st_length(geometry))
+
+testsegment_split100 <- as_Spatial(testsegment) %>%
+  splitLines(dist = 100, start = TRUE, sf = TRUE) %>%
+  mutate(segmentlength = st_length(geom))
+
+segments_samplingframe_toolong_split100 <- as_Spatial(segments_samplingframe_toolong) %>%
+  splitLines(dist = 100, start = TRUE, sf = TRUE) %>%
+  mutate(segmentlength = st_length(geom))
+
+plot(segments_samplingframe_toolong_split100[3,])
+plot(testsegment_split100)
+
+```
+
+
+
+```{r}
+segments_samplingframe_toolong_split %>%
+  st_transform(4326) %>%
+  mutate(showcolour = ifelse(segmentlength > 120, inbo.rood, inbo.groen)) %>%
+  #filter(segmentlength > 120) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(data = st_transform(segmentpoints_samplingframe, crs = 4326), radius = 0.5) %>%
+  addPolylines(color = ~showcolour)
+```
+
+
+
+```{r}
+segmentpoints_samplingframe_buffer <- st_buffer(segmentpoints_samplingframe, dist = 5) %>%
+  select(segment_id)
+
+map_3260_new_buffer <- st_buffer(map_3260_new, dist = 5) %>%
+  select(naam)
+
+watercourse_100mseg_lines_3260 <- watercourse_100mseg_lines %>%
+  st_join(segmentpoints_samplingframe_buffer) %>%
+  st_join(map_3260_new_buffer) %>%
+  filter(!is.na(naam) | !is.na(segment_id))
+
+
+
+
+```
+
