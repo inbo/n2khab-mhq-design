@@ -11,3 +11,8 @@ Encoding: UTF-8
 
 RnwWeave: knitr
 LaTeX: XeLaTeX
+
+BuildType: Website
+WebsitePath: src
+
+SpellingDictionary: en_GB

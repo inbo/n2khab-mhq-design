@@ -1,0 +1,226 @@
+# Update sampling frame
+
+We will update the sampling frame based on the `watersurfaces_hab` (version v4) data source.
+
+
+```{r}
+watersurfaces_hab <- read_watersurfaces_hab()
+
+path <- fileman_up("n2khab_data")
+file <- "20_processed/watersurfaces_hab/watersurfaces_hab.gpkg"
+
+md5 <- file.path(path, file) %>%
+  file() %>%
+  md5() %>%
+  str_c(collapse = '')
+
+md5_ref <- "96b6a7abc3d637d71052900970e70904"
+
+tibble(
+  file = file.path(path, file), md5, md5_ref
+) %>%
+  kable() %>%
+  kable_styling()
+
+watersurfaces_hab_types <- watersurfaces_hab$watersurfaces_types %>%
+  filter(! str_detect(type, "rbb")) %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  group_by(polygon_id, main_type) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(!((type == main_type) & (n > 1))) %>%
+  select(-n, -main_type) #bij sommige polygonen zowel 3130 (meestal 3130_rbb..) als 3130_aom als type --> enkel 3130_aom behouden 
+
+```
+
+## Updating watersurface reference points
+
+
+The reference point of a watersurface is the point location based on which the grts_ranking of the watersurface is defined. 
+
+We update the table of watersurface reference points as follows:
+
++ We start from the table of reference points (`watersurfaces_refpoints`) that is based on the original design of the mhq schemes and the assessments until 2020.
++ Next, we identify watersurfaces from watersurface_hab that are not in the original watersurfaces_refpoints table and define the refpoint using `point_on_surface`. 
++ Then we assign the grts_ranking to the reference point based on the `GRTSmh` data source 
++ finally we add the new reference points to `watersurfaces_refpoints` 
+
+```{r}
+grts_master <- read_GRTSmh()
+
+watersurfaces_refpoints <- read_vc(file = "watersurfaces_refpoints", root = "../output")
+
+refpoints_new <- watersurfaces_hab$watersurfaces_polygons %>%
+  anti_join(watersurfaces_refpoints, by = "polygon_id") %>%
+  # semi_join(mhq_watersurfaces_samplingunits_new, by = "code_watersurfaces") %>%
+  st_point_on_surface() 
+
+refpoints_new <- refpoints_new %>%
+  mutate(grts_ranking = (terra::extract(grts_master, refpoints_new))$GRTSmaster_habitats,
+         in_object = TRUE)
+
+refpoints_new <- refpoints_new %>%
+  st_drop_geometry() %>%
+  mutate(x = round(st_coordinates(refpoints_new)[,1], 2),
+         y = round(st_coordinates(refpoints_new)[,2], 2)) %>%
+  select(polygon_id, grts_ranking, in_object, x, y)
+    
+watersurfaces_refpoints_update <- watersurfaces_refpoints %>%
+  bind_rows(refpoints_new) %>%
+  select(polygon_id, everything())
+
+check <- watersurfaces_refpoints_update %>%
+  group_by(polygon_id) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+watersurfaces_refpoints_update %>%
+  write_vc("watersurfaces_refpoints", "../output", sorting = c("polygon_id"))
+
+```
+
+
+```{r}
+watersurfaces_refpoints_update %>%
+  slice(1:5)
+```
+
+## Updating mhq watersurfaces population units
+
+The table `mhq_watersurfaces_populationunits` contains all population units in the sample frame of the mhq schemes.
+The original table is based on the original design of mhq.
+We want to keep the grts_ranking and grts_ranking_draw of the original design to assure maximum overlap between samples drawn from different versions of the sample frame.
+
+We update the table as follows:
+
++ From the `watersurface_hab` data source we select all watersurface/type combinations that are not in the original sample frame.
++ We add the grts_ranking to the selected watersurfaces from the `watersurfaces_refpoints` table
++ We add the new sampling units to the `mhq_watersurfaces_populationunits` table. 
++ Based on the mhq assessments we check if the target type was observed in the assessed watersurfaces. If not the watersurface is removed from the table. 
++ Population units (polygon_id/type combination) from the original sampling frame that not have been assessed yet and that do not occur in the latest version of watersurfaces_hab are removed 
+
+```{r}
+
+mhq_watersurfaces_populationunits <- read_vc(file = "mhq_watersurfaces_populationunits", root = "../output")
+
+mhq_watersurfaces_populationunits_3130 <- mhq_watersurfaces_populationunits %>%
+  filter(str_sub(type, 1, 4) == "3130")
+
+mhq_watersurfaces_populationunits_new <-  watersurfaces_hab_types %>%
+  distinct(polygon_id, type) %>%
+  anti_join(mhq_watersurfaces_populationunits, by = c("polygon_id", "type")) %>%
+  filter(!(polygon_id %in% mhq_watersurfaces_populationunits_3130$polygon_id &
+            type == "3130")) %>%
+  # filter(!str_detect(polygon_id, "_v")) %>%
+  mutate(source = "watersurfaces_hab_v4") %>%
+  left_join(select(watersurfaces_refpoints_update, polygon_id, grts_ranking), by = "polygon_id") %>%
+  mutate(grts_ranking_draw = grts_ranking,
+         sampling_unit_code = polygon_id) 
+
+mhq_watersurfaces_populationunits_update <- mhq_watersurfaces_populationunits %>%
+  bind_rows(mhq_watersurfaces_populationunits_new)
+  
+mhq_watersurfaces_assessments <- read_vc(file = "mhq_watersurfaces_assessments", root = "../output")
+
+watersurfaces_populationunits <- mhq_watersurfaces_populationunits_update %>%
+  left_join(mhq_watersurfaces_assessments, by = c("polygon_id", "type")) %>%
+  filter(is_present | is.na(is_present)) %>%
+  select( sampling_unit_code, polygon_id, type, grts_ranking, grts_ranking_draw, source)
+
+# watersurfaces_hab_3130 <- watersurfaces_hab_types %>%
+#   filter(type == "3130")
+# 
+# watersurfaces_populationunits_remove <- watersurfaces_populationunits %>%
+#   filter(!assessed) %>%
+#   anti_join(watersurfaces_hab_types, by = c("polygon_id", "type")) %>%
+#   filter(! (str_sub(type, 1,4) == "3130" & polygon_id %in% watersurfaces_hab_3130$polygon_id))
+# 
+# watersurfaces_populationunits <- watersurfaces_populationunits %>%
+#   anti_join(watersurfaces_populationunits_remove, by = c("polygon_id", "type")) %>%
+#   rename(type = type) %>%
+#   unique()
+
+check <- watersurfaces_populationunits %>%
+  group_by(polygon_id, type) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+remove <- watersurfaces_populationunits %>%
+  filter(source == "original sample frame") %>%
+  anti_join(watersurfaces_hab_types, by = c("polygon_id", "type"))
+
+gh <- mhq_watersurfaces_assessments %>%
+  filter(!any_habitat)
+
+watersurfaces_populationunits_select <- watersurfaces_populationunits %>%
+  anti_join(remove, by = c("polygon_id", "type")) %>%
+  anti_join(gh, by = "polygon_id")
+
+check <- watersurfaces_populationunits_select %>%
+  group_by(polygon_id, type) %>%
+  mutate(n = n()) %>%
+  ungroup() %>%
+  filter(n > 1)
+
+```
+```{r}
+
+sac_sf <- read_admin_areas(dsn = "sac") %>%
+  group_by(sac_name) %>%
+  summarise(n_pol = n()) %>%
+  ungroup() %>%
+  select(sac_name)
+
+```
+
+```{r}
+
+
+watersurfaces_hab <- read_watersurfaces_hab()
+
+filepath <-  file.path(fileman_up("n2khab_data"), "20_processed/watersurfaces_hab/watersurfaces_hab.gpkg")
+
+check_version <- n2khab::xxh64sum(filepath) == "5792b496a94d0524"
+
+watersurfaces_hab <- watersurfaces_hab$watersurfaces_polygons %>%
+  semi_join(watersurfaces_populationunits, by = "polygon_id") %>%
+  select(polygon_id)
+
+watersurfaces_extra <- read_watersurfaces(version = "watersurfaces_v1.1") %>%
+  filter(polygon_id %in% watersurfaces_populationunits$polygon_id) %>%
+  filter(! polygon_id %in% watersurfaces_hab$polygon_id) %>%
+  select(polygon_id)
+
+watersurfaces_area_sf <- watersurfaces_hab %>%
+  bind_rows(watersurfaces_extra) %>%
+  mutate(area_ha = drop_units(st_area(geom))/10000,
+         area_polygon_ha = area_ha,
+         area_class = ifelse(area_ha <= 1, "area <= 1 ha",
+                             ifelse(area_ha <= 5, "1 ha < area <= 5 ha",
+                                    ifelse(area_ha < 50, "5 ha < area < 50 ha", "area >= 50 ha"))),
+         area_class = factor(area_class, levels = c("area <= 1 ha", "1 ha < area <= 5 ha", "5 ha < area < 50 ha", "area >= 50 ha"))) %>%
+  st_join(sac_sf) %>%
+  mutate(sac = !is.na(sac_name)) 
+
+watersurfaces_area <- watersurfaces_area_sf %>%
+  st_drop_geometry() %>%
+  select(polygon_id, area_class, sac)
+
+watersurfaces_populationunits <- watersurfaces_populationunits_select %>%
+  left_join(watersurfaces_area, by = "polygon_id") %>%
+  select(scheme, sampling_unit_code, polygon_id, area_class, sac, everything())
+
+watersurfaces_populationunits %>%
+  write_vc("mhq_watersurfaces_populationunits", root = "../output", sorting = c("type", "grts_ranking_draw", "polygon_id"), strict = FALSE)
+```
+
+
+```{r}
+watersurfaces_populationunits %>%
+  slice(1:5, 400:405)
+```
+
+
+
