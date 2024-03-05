@@ -1,0 +1,622 @@
+---
+title: "MHQ forest habitats: selection of sampling units to complete the first monitoring cycle"
+output: html_document
+date: "2024-01-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(git2rdata)
+library(RODBC)
+library(leaflet)
+library(n2khab)
+library(kableExtra)
+library(terra)
+```
+
+## Sample size forest habitat types
+
+See [this report](https://publicaties.vlaanderen.be/view-file/52364).
+
+```{r}
+sample_size <- read_vc("samplesize_mhq_terr_v2021", "../data")
+
+sample_size_forest <- sample_size %>%
+  filter(typeclass == "FS") %>%
+  select(type, typelevel, sac, n_finite_flanders, n_extra_subtype) %>%
+  unique() %>%
+  mutate(n_extra_subtype = ifelse(type %in% c("9130_fm", "9120_qb"), 0, n_extra_subtype)) %>%
+  group_by(type, typelevel) %>%
+  summarise(n_finite_flanders = sum(n_finite_flanders),
+            n_extra_subtype = sum(n_extra_subtype)) %>%
+  ungroup() %>%
+  mutate(n_total = n_finite_flanders + n_extra_subtype) 
+```
+
+
+## Available sampling units from Flemish Forest inventory
+
+We make use of following data sources (see [google drive](https://drive.google.com/drive/folders/1TjONf7WuoEYM6TzfHp9UW5KVw6ljMDgs)):
+
++ `vbi_strata_v2024-01-24.accdb`: observed habitat type (only available for the more recently measured plots)
++ `vbi_meetproces_v2022-11-15.accdb`: recorded coordinates
++ `vbi_analysedatabank_v2023-08-22.accdb`: contains information on the plots for which vegetation and dendrometric data is recorded
+
+For each plot we select the most recent inventary period and the corresponding coordinates and observations.
+
+
+```{r}
+
+db_strata <- "../data/vbi_strata_v2024-01-24.accdb"
+db_meetproces <- "../data/vbi_meetproces_v2022-11-15.accdb"
+db_analyse <- "../data/vbi_analysedatabank_v2023-08-22.accdb"
+
+connect_db <-   odbcConnectAccess2007(db_strata)
+strata_orig <- sqlFetch(connect_db, "tblplotstratadynamic")
+odbcClose(connect_db)
+
+connect_db <-   odbcConnectAccess2007(db_meetproces)
+coordinaten_orig <- sqlFetch(connect_db, "tblcoordinaten")
+odbcClose(connect_db)
+
+connect_db <-   odbcConnectAccess2007(db_analyse)
+bestandskarakt_orig <- sqlFetch(connect_db, "tbl2BestandskaraktKwal")
+odbcClose(connect_db)
+
+strata <- strata_orig %>%
+  select(plot_id = IDPlots, segment_id = IDSegments, periode = Periode, landuse = LandUse, stand_type = StandType, type_observed = Habitat) %>%
+  filter(!is.na(stand_type)) %>%
+  select(-stand_type)
+
+coordinaten <- coordinaten_orig %>%
+  select(plot_id = idplots, x, y, type_coord = type, periode, plotweight)
+
+bestandskarakt <- bestandskarakt_orig %>%
+  select(plot_id = IDPlots, periode = Periode, segment_id = IDSegments, stand_type = v2_StandType)
+
+```
+
+Based on the coordinates we make an overlay with [habitatmap_terr_2023] ADDLINK
+
+```{r}
+habmap_terr <- read_habitatmap_terr(keep_aq_types = FALSE)
+
+```
+
+Let's check the version.
+
+```{r}
+check_version <- tibble(version_name = "habitatmap_terr_2023_v1",
+                        md5_zenodo = "aed93b1293021a83d3dbe2db50b46585",
+                        md5_file = md5sum(file.path(fileman_up("n2khab_data"), "20_processed/habitatmap_terr/habitatmap_terr.gpkg")))
+
+check_version %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+
+```{r}
+bestandskarakt_actual <- bestandskarakt %>%
+  group_by(plot_id) %>%
+  slice_max(periode) %>%
+  ungroup() %>%
+  filter(segment_id == 1) %>%
+  filter(periode > 1) %>%
+  filter(!is.na(stand_type))
+
+vbi_meetpunten_sf <- bestandskarakt_actual %>%
+  left_join(strata, by = c("plot_id", "periode", "segment_id")) %>%
+  left_join(coordinaten, by = c("plot_id", "periode")) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(select(habitatmap_terr$habitatmap_terr_polygons, polygon_id))
+
+vbi_meetpunten_hab <- vbi_meetpunten_sf %>%
+  st_drop_geometry() %>%
+  left_join(habitatmap_terr$habitatmap_terr_types, by = "polygon_id") %>%
+  mutate(main_type = str_sub(type, 1, 4))
+
+```
+### Samplesize per type based on overlay between plot coordinates and habitatmap_terr 
+
+```{r}
+
+vbi_samplesize_main_type <- vbi_meetpunten_hab %>%
+  filter(!is.na(polygon_id)) %>%
+  filter(certain) %>%
+  filter(str_sub(type, 1, 1) == "9") %>%
+  group_by(main_type, certain) %>%
+  summarise(n_records = n(),
+            n_prob = sum(phab/100)) %>%
+  ungroup()
+
+vbi_samplesize_type <- vbi_meetpunten_hab %>%
+  filter(!is.na(polygon_id)) %>%
+  filter(certain) %>%
+  filter(str_sub(type, 1, 1) == "9") %>%
+  group_by(type, certain) %>%
+  summarise(n_records = n(),
+            n_prob = sum(phab/100)) %>%
+  ungroup()
+```
+The table below shows the expected number of sampling units (`n_prob`) per type based onthe overlay between plot coordiantes and habitatmap_terr.
+Some polygons of the habitatmap contain different types or are only partially coverd by habitat.
+This is expressed by the variable (`phab`), for example 70% 9120.
+The probability that a plot contains the target type, is equal to the `phab` value.
+So a plot that is situated in a polygon with 70% 9120 is counted as 0.7 sampling units for 9120.
+
+```{r}
+vbi_samplesize_main_type %>%
+  kable() %>%
+  kable_styling()
+```
+```{r}
+vbi_samplesize_type %>%
+  kable() %>%
+  kable_styling()
+```
+
+### Samplesize based on observed types
+
+```{r}
+vbi_meetpunten_hab_observed <- vbi_meetpunten_hab %>%
+  filter(!is.na(type_observed)) %>%
+  mutate(type_observed_std = ifelse(type_observed == "9 : bossen", "9xxx",
+                                ifelse(!str_sub(type_observed, 1, 4) %in% vbi_samplesize_main_type$main_type, "gh", type_observed)),
+         type_observed_std = str_replace(type_observed_std, " ", "_")) %>% 
+  mutate(main_type_observed = str_sub(type_observed_std, 1, 4),
+         main_type = ifelse(is.na(main_type), "gh", main_type),
+         type = if_else(is.na(type), "gh", as.character(type)),
+         phab = ifelse(is.na(phab), 100, phab)) 
+
+accuracy_main_type_observed <- vbi_meetpunten_hab_observed %>%
+  group_by(main_type, main_type_observed) %>%
+  summarise(n_prob = sum(phab/100)) %>%
+  ungroup() %>%
+  filter(main_type %in% vbi_samplesize_main_type$main_type | main_type == "gh")
+
+```
+When we compare the observed type (`main_type_observed`) in the forest inventory with the type according to the habitatmap (`main_type`), we see quite a lot of differences, even when only comparing the main_type.
+See the table below.
+
+```{r}
+accuracy_main_type_observed %>%
+  arrange(main_type, main_type_observed) %>%
+  pivot_wider(names_from = "main_type_observed", values_from = "n_prob", values_fill = 0) %>%
+  select(main_type, "9110", "9120", "9130", "9160", "9190", "91E0", "9xxx", gh) %>%
+  kable() %>%
+  kable_styling() %>%
+  add_header_above(header = c(" " = 1, "main_type observed" = 8))
+```
+
+Below we show the sample size per type for both sources.
+
+```{r}
+overzicht_vbi_observed <- vbi_meetpunten_hab_observed %>%
+  group_by(type_observed_std) %>%
+  summarise(n_vbi_observed = n_distinct(plot_id)) %>%
+  ungroup() %>%
+  rename(type = type_observed_std)
+
+overzicht_vbi_habmap <- vbi_meetpunten_hab_observed %>%
+  mutate(type = ifelse(str_sub(type, 1,1) != "9", "gh", type)) %>%
+  group_by(type) %>%
+  summarise(n_vbi_habitatmap = sum(phab/100)) %>%
+  ungroup() 
+
+overzicht_vbi <- overzicht_vbi_observed %>%
+  full_join(overzicht_vbi_habmap, by = "type") %>%
+  mutate(n_vbi_observed = replace_na(n_vbi_observed, 0),
+         n_vbi_habitatmap = replace_na(n_vbi_habitatmap, 0))
+
+check <- sum(overzicht_vbi$n_vbi_observed)
+check2 <- sum(overzicht_vbi$n_vbi_habitatmap)
+
+overzicht_vbi %>%
+  arrange(type) %>%
+  kable() %>%
+  kable_styling()
+```
+
+Let's clean up a bit.
+
+Let's first remove the records for which both the habitatmap type and the observed type does not belong to the 91xx habitat group.
+This also includes the recorded habitat type `9 : bossen`.
+
+
+```{r}
+vbi_meetpunten_hab_observed_filter1 <- vbi_meetpunten_hab_observed %>%
+  filter(str_sub(main_type, 1, 2) == "91" | str_sub(main_type_observed, 1, 2) == "91")
+
+remove_filter1 <- vbi_meetpunten_hab_observed %>%
+  anti_join(vbi_meetpunten_hab_observed_filter1, by = c("plot_id", "type"))
+```
+
+Some examples of removed records:
+
+```{r}
+remove_filter1 %>%
+  select(plot_id, type_observed, polygon_id, type, main_type, phab) %>%
+  slice_head(n = 20)
+```
+
+Next, we remove the plots with observed_type = no habitat `gh` and the plot is situated in a polygon that only partially contain 91xx.
+
+```{r}
+vbi_meetpunten_hab_observed <- vbi_meetpunten_hab_observed_filter1 %>%
+  mutate(cover_91xx = ifelse(str_sub(main_type, 1, 2) == "91", phab, 0)) %>%
+  group_by(plot_id) %>%
+  mutate(phab_91xx = sum(cover_91xx),
+         any_match_type = any(type_observed_std == type),
+         any_match_main_type = any(main_type_observed == main_type),
+         n_types = n()) %>%
+  ungroup()
+
+vbi_meetpunten_hab_observed_filter2 <- vbi_meetpunten_hab_observed %>%
+  filter(!(type_observed_std == "gh" & phab_91xx < 100))
+```
+
+The removed records:
+
+```{r}
+
+remove_filter2 <- vbi_meetpunten_hab_observed %>%
+  anti_join(vbi_meetpunten_hab_observed_filter2, by = c("plot_id", "type"))
+
+remove_filter2 %>%
+  select(plot_id, type_observed, polygon_id, type, main_type, phab, phab_91xx) 
+```
+
+In case of habitatmap polygons with different types, and when one of these types correspond with the observed type we remove the habitatmap type that does not correspond with the observed type.
+
+```{r}
+
+vbi_meetpunten_hab_observed_filter3 <- vbi_meetpunten_hab_observed_filter2 %>%
+  filter(!(n_types > 1 & any_match_type & type != type_observed_std)) 
+
+```
+
+The removed records:
+
+```{r}
+
+remove_filter3 <- vbi_meetpunten_hab_observed_filter2 %>%
+  anti_join(vbi_meetpunten_hab_observed_filter3, by = c("plot_id", "type"))
+
+remove_filter3 %>%
+  select(plot_id, type_observed_std, polygon_id, type, main_type, phab, any_match_type, n_types) 
+```
+
+Next, also in case of habitatmap polygons with different **main** types, and when one of these **main** types correspond with the observed **main** type we remove the habitatmap **main** type that does not correspond with the observed **main** type.
+
+```{r}
+vbi_meetpunten_hab_observed_filter4 <- vbi_meetpunten_hab_observed_filter3 %>%
+  group_by(plot_id) %>%
+  mutate(n_types = n(),
+         n_main_types = n_distinct(main_type)) %>%
+  ungroup() %>%
+  filter(!(n_main_types > 1 & any_match_main_type & main_type != main_type_observed)) %>%
+  filter(! (cover_91xx == 0 & phab_91xx > 0))
+  
+```
+
+```{r}
+
+remove_filter4 <- vbi_meetpunten_hab_observed_filter3 %>%
+  anti_join(vbi_meetpunten_hab_observed_filter4, by = c("plot_id", "type"))
+
+remove_filter4 %>%
+  select(plot_id, type_observed_std, polygon_id, type, main_type, phab, any_match_main_type) 
+```
+
+Finally, we also remove the plots with stand_type = `open ruimte binnen bos`. 
+Also remove stand_type = `naaldhout`?
+
+```{r}
+vbi_meetpunten_hab_observed_filter5 <- vbi_meetpunten_hab_observed_filter4 %>%
+  filter(!stand_type == "open ruimte binnen bos")
+  
+```
+
+```{r}
+
+remove_filter5 <- vbi_meetpunten_hab_observed_filter4 %>%
+  anti_join(vbi_meetpunten_hab_observed_filter5, by = c("plot_id", "type"))
+
+remove_filter5 %>%
+  select(plot_id, stand_type, type_observed_std, polygon_id, type, main_type, phab) 
+```
+
+prop_type_match <- sum(vbi_meetpunten_hab_observed_filter4$any_match_type) / nrow(vbi_meetpunten_hab_observed_filter4)
+
+prop_main_type_match <- sum(vbi_meetpunten_hab_observed_filter4$any_match_main_type) / nrow(vbi_meetpunten_hab_observed_filter4)
+
+Now, for some records we can decide what is the most probable type in case of a mismatch between the observed type and the habitatmap type.
+
++ Rule 1: When the observed type = `9 : bossen` and the habitatmap polygon contains only one forest type, we assume that the habitatmap type is correct.
+
++ Rule 2: When the observed type = `91E0*` and the habitatmap polygon contains only one 91E0 type, we assume that the habitatmap type is correct.
+
+```{r}
+vbi_meetpunten_hab_observed_rule1 <- vbi_meetpunten_hab_observed_filter5 %>%
+  mutate(type_decided = ifelse(type_observed_std == type, type, NA),
+         type_decided = ifelse(type_observed_std == "9xxx" & n_types == 1, type, type_decided),
+         type_decided = ifelse(type_observed_std == "91E0*" & n_types == 1 & main_type == "91E0", type, type_decided))
+
+```
+
+Now, let 's check the result. Below we show the number of plots per type where we have a match between the habitatmap type and the observed type.
+
+```{r}
+vbi_meetpunten_hab_match <- vbi_meetpunten_hab_observed_rule1 %>%
+  filter(!is.na(type_decided)) %>%
+  group_by(type_decided) %>%
+  summarise(samplesize_match = n_distinct(plot_id)) %>%
+  ungroup() %>%
+  rename(type = type_decided)
+
+observed_nomatch <- vbi_meetpunten_hab_observed_rule1 %>% 
+  filter(is.na(type_decided)) %>%
+  group_by(type_observed_std) %>%
+  summarise(samplesize_nomatch_observed = n_distinct(plot_id)) %>%
+  ungroup() %>%
+  rename(type = type_observed_std) %>%
+  filter(str_sub(type, 1, 2) == "91") %>%
+  mutate(type = ifelse(type == "91E0*", "91E0", type))
+
+habitatmap_nomatch <- vbi_meetpunten_hab_observed_rule1 %>% 
+  filter(is.na(type_decided)) %>%
+  group_by(type) %>%
+  summarise(samplesize_nomatch_habitatmap = sum(phab/100)) %>%
+  ungroup() %>%
+  filter(str_sub(type, 1, 2) == "91")
+
+vbi_notobserved <- vbi_meetpunten_hab %>%
+  filter(is.na(type_observed)) %>% 
+  group_by(type) %>%
+  summarise(samplesize_habitatmap_not_observed = sum(phab/100)) %>%
+  ungroup() %>%
+  filter(str_sub(type, 1, 2) == "91")
+  
+```
+
+```{r}
+vbi_samplesize <- vbi_notobserved %>%
+  left_join(vbi_meetpunten_hab_match, by = "type") %>%
+  left_join(observed_nomatch, by = "type") %>%
+  left_join(habitatmap_nomatch, by = "type") %>%
+  mutate(samplesize_match = ifelse(is.na(samplesize_match), 0, samplesize_match),
+         samplesize_nomatch_observed = ifelse(is.na(samplesize_nomatch_observed), 0, samplesize_nomatch_observed)) %>%
+  mutate(samplesize_min = samplesize_habitatmap_not_observed + samplesize_match + pmin(samplesize_nomatch_habitatmap, samplesize_nomatch_observed),
+         samplesize_max = samplesize_habitatmap_not_observed + samplesize_match + pmax(samplesize_nomatch_habitatmap, samplesize_nomatch_observed),)
+```
+
+In the table below we show:
+
++ samplesize_habitatmap_not_observed: expected number of sampling units per type based on the forest inventory plots for which the observed type was not yet recorded (type is determined by overlay with the habitatmap)
++ samplesize_match: number of sampling units pet type for which the observed type corresponds with the habitatmap type
++ samplesize_nomatch_observed: number of sampling units pet type based on the observed type, in case there is no match betweeb the observed type and the habitatmap type
++ samplesize_nomatch_habitat: number of sampling units pet type based on the habitatmap type, in case there is no match betweeb the observed type and the habitatmap type
+
+The minimum/maximum samplesize is then equal to samplesize_habitatmap_not_observed + samplesize_match + the minimum/maximum of samplesize_nomatch_observed and samplesize_nomatch_habitat.
+
+
+```{r}
+vbi_samplesize %>%
+  kable() %>%
+  kable_styling()
+```
+
+The records with no match should be checked manually, for example using orthophoto's and species lists.
+
+```{r}
+
+```
+
+## Extra meetpunten voor meetnet habitatkwaliteit
+
+Hier geven we een overzicht van de extra meetpunten die opgemeten werden voor het meetnet habitatkwaliteit in de periode 2015 - 2020.
+
+We baseren ons hiervoor op het git2rdata bestand 'assessments' in [deze repo](https://github.com/inbo/n2khab-mhq-data/tree/master/processed/fieldmap_mhq).
+
+
+```{r}
+mhq_assessments <- read_vc(file = "assessments", root = "../data/mhq_fieldmap")
+mhq_type_observed <- read_vc(file = "type_observed", root = "../data/mhq_fieldmap") %>%
+  mutate(plot_id = as.character(plot_id))
+
+mhq_assessments_forest <- mhq_assessments %>%
+  filter(is.na(sampling_unit_code))
+
+mhq_measured <- mhq_assessments_forest %>%
+  filter(lsvi_measurement) %>%
+  filter(!is.na(type_observed)) %>%
+  mutate(type_observed = ifelse(type_observed == "9130", "9130_end", type_observed)) %>%
+  group_by(type_observed) %>%
+  summarise(n_measured_extra = n_distinct(plot_id)) %>%
+  ungroup() %>%
+  rename(type = type_observed)
+
+mhq_measured %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+## To do
+
+Hieronder geven we een overzicht van de nog resterende meetpunten (`n_extra_todo`) om de totale steekproefgrootte (`n_total`) te bekomen, rekening houdend met het aantal meepunen via de bosinventarisatie (`n_vbi`) en het aantal extra meetpunten opgemeten in het meetnet habitatkwaliteit (`n_extra_measured`) 
+
+Een overbemonstering voor het subtype 9120_qb en 9130_fm, rekenen we hier niet mee, omdat dit in het initiële meetnetontwerp ook niet opgenomen werd. 
+Ook de resterende punten voor 91E0_sf worden hier niet weergegeven omdat dit door het INBO gebeurt. 
+
+```{r}
+sample_size_to_do <- sample_size_forest %>%
+  left_join(vbi_samplesize_type, by = "type") %>%
+  mutate(n_vbi = ifelse(is.na(n_prob), 0, n_prob)) %>%
+  mutate(n_extra = pmax(0, n_total - n_vbi)) %>%
+  left_join(mhq_measured, by = "type") %>%
+  mutate(n_measured_extra = ifelse(is.na(n_measured_extra), 0, n_measured_extra)) %>%
+  mutate(n_extra_todo = pmax(0, n_extra - n_measured_extra))
+
+sample_size_to_do_anb <- sample_size_to_do %>%
+  filter(type != "91E0_sf")
+
+sample_size_to_do_anb_total <- sum(sample_size_to_do_anb$n_extra_todo)
+
+sample_size_to_do_anb_year <- sample_size_to_do_anb_total/3
+
+sample_size_to_do_anb %>%
+  select(type, n_total, n_vbi, n_extra, n_extra_measured = n_measured_extra, n_extra_todo) %>%
+  kable(digits = 1) %>%
+  kable_styling()
+```
+
+Het totaal aantal resterende meetpunten voor de 12-jarige meetcyclus bedraagt `r round(sample_size_to_do_anb_total)`.
+Als we dit in de periode 2024 - 2026 willen afwerken, komt dit neer op `r round(sample_size_to_do_anb_year)` meetpunten per jaar.
+
+
+## Steekproeftrekking
+
+### Sample frame
+
+We make use of the datasource `habmap_terr` which can be downloaden ADD LINK.
+
+```{r}
+habmap_terr <- read_habitatmap_terr(keep_aq_types = FALSE)
+
+```
+
+Let's check the version.
+
+```{r}
+check_version <- tibble(version_name = "habitatmap_terr_2023_v1",
+                        md5_zenodo = "aed93b1293021a83d3dbe2db50b46585",
+                        md5_file = md5sum(file.path(fileman_up("n2khab_data"), "20_processed/habitatmap_terr/habitatmap_terr.gpkg")))
+
+check_version %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+We create population units by overlay the habitatmap with the grts_master (containing the grts-ranking). 
+
+
+```{r}
+
+if (!file.exists("../output/grts_habmap_points.tsv")) {
+  
+  raster_runif <- terra::rast(file.path(fileman_up("n2khab_data"), "20_processed/raster_runif/raster_runif.tif"))
+  
+  min_phab <- 10
+  
+  habmap_types <- habmap_terr$habitatmap_terr_types %>%
+      group_by(polygon_id, code_orig) %>%
+        mutate(n = n()) %>%
+      ungroup() %>%
+      group_by(polygon_id, type) %>%
+       summarise(phab = sum(phab/n),
+                code_orig = str_c(code_orig, collapse = "; ")) %>%
+      ungroup() %>%
+      filter(phab > min_phab)
+  
+  habmap_polygons <- habmap_terr$habitatmap_terr_polygons %>%
+      filter(polygon_id %in% habmap_types$polygon_id) 
+  
+  types <- read_types() %>%
+    select(type, typelevel, main_type)
+  
+  sac <- read_admin_areas(dsn = "sac") %>%
+    select(sac_code)
+  
+  grts_master <- read_GRTSmh()
+  
+  grts_habmap_mask <- grts_master %>%
+      crop(habmap_polygons) %>%
+      mask(habmap_polygons) 
+  
+  grts_habmap_points <- grts_habmap_mask %>%
+    as.points() %>%
+    st_as_sf()  %>%
+    st_join(habmap_polygons) %>%
+    st_join(sac) %>%
+    mutate(sac = !is.na(sac_code)) %>%
+    dplyr::select(polygon_id, grts_ranking = GRTSmaster_habitats, sac)
+  
+grts_habmap_points2 <- grts_habmap_points %>%
+  mutate(prob = (terra::extract(raster_runif, grts_habmap_points))$raster_runif)
+  
+  grts_habmap_points <- grts_habmap_points2 %>%
+    st_drop_geometry() %>%
+    mutate(x = st_coordinates(grts_habmap_points)[,1],
+           y = st_coordinates(grts_habmap_points)[,2])
+  
+  grts_habmap_points <- grts_habmap_points %>%
+    filter(!is.na(polygon_id)) %>%
+    left_join(habmap_types, by = "polygon_id")
+  
+  grts_habmap_points_top250 <- grts_habmap_points %>%
+    group_by(type) %>%
+    slice_min(grts_ranking, n = 250) %>%
+    ungroup()
+  
+  write_vc(grts_habmap_points_top250, file = "grts_habmap_points", 
+           root = "../output", 
+           sorting = c("type" ,"grts_ranking"), strict = FALSE)
+  
+  grts_habmap_points <- grts_habmap_points_top250
+  
+} else {
+  
+  grts_habmap_points <- read_vc(file = "grts_habmap_points", root = "../output")
+  
+}
+
+grts_hab91xx <- grts_habmap_points %>%
+  filter(str_sub(type, 1, 2) == "91")
+
+
+```
+
+### Assessments
+
+```{r}
+
+path = fileman_up("n2khab-mhq-data")
+
+mhq_assessments <- read_vc(root = file.path(path, "processed/fieldmap_mhq/"), "assessments")
+
+mhq_assessments <- mhq_assessments %>%
+  mutate(grts_ranking = as.numeric(plot_id),
+         type_observed = ifelse(type_observed == "9130", "9130_end", type_observed))
+
+inaccessible <- mhq_assessments %>%
+  filter(inaccessible == "long term")
+ 
+no_habitat <- mhq_assessments %>%
+  filter(str_detect(type_observed, "geen habitat") | type_observed == "9 : bossen")
+
+grts_hab91xx_assessments <- grts_hab91xx %>%
+  anti_join(no_habitat, by = "grts_ranking") %>% 
+  filter(type != "91E0_sf") %>%
+  anti_join(inaccessible, by = "grts_ranking") %>%
+  left_join(mhq_assessments, by = "grts_ranking") %>%
+  mutate(source = ifelse(is.na(type_observed), "habitatmap_terr_2023_v1",
+                         ifelse(type_observed == type, "habitatmap_terr_2023_v1/assessment_cycle1",
+                                "assessment_cycle1")),
+          phab = ifelse(!is.na(type_observed), 100, phab),
+         type = ifelse(!is.na(type_observed), type_observed, as.character(type))) %>%
+  select(polygon_id, code_orig, grts_ranking, sac, phab, prob, type, type_observed, lsvi_measurement, assessment_source, source) %>%
+  arrange(type, grts_ranking) %>%
+  mutate(selection_step1 = prob < phab/100)
+
+  
+
+
+
+```
+
