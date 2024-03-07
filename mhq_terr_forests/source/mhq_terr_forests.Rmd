@@ -14,6 +14,8 @@ library(leaflet)
 library(n2khab)
 library(kableExtra)
 library(terra)
+library(buffeRs)
+library(crosstalk)
 ```
 
 ## Sample size forest habitat types
@@ -44,8 +46,7 @@ We make use of following data sources (see [google drive](https://drive.google.c
 + `vbi_meetproces_v2022-11-15.accdb`: recorded coordinates
 + `vbi_analysedatabank_v2023-08-22.accdb`: contains information on the plots for which vegetation and dendrometric data is recorded
 
-For each plot we select the most recent inventary period and the corresponding coordinates and observations.
-
+For each plot we select the most recent inventory period and the corresponding coordinates and observations.
 
 ```{r}
 
@@ -239,8 +240,7 @@ Some examples of removed records:
 
 ```{r}
 remove_filter1 %>%
-  select(plot_id, type_observed, polygon_id, type, main_type, phab) %>%
-  slice_head(n = 20)
+  select(plot_id, type_observed, polygon_id, type, main_type, phab) 
 ```
 
 Next, we remove the plots with observed_type = no habitat `gh` and the plot is situated in a polygon that only partially contain 91xx.
@@ -299,7 +299,7 @@ vbi_meetpunten_hab_observed_filter4 <- vbi_meetpunten_hab_observed_filter3 %>%
          n_main_types = n_distinct(main_type)) %>%
   ungroup() %>%
   filter(!(n_main_types > 1 & any_match_main_type & main_type != main_type_observed)) %>%
-  filter(! (cover_91xx == 0 & phab_91xx > 0))
+  filter(!(cover_91xx == 0 & phab_91xx > 0))
   
 ```
 
@@ -312,16 +312,25 @@ remove_filter4 %>%
   select(plot_id, type_observed_std, polygon_id, type, main_type, phab, any_match_main_type) 
 ```
 
-Finally, we also remove the plots with stand_type = `open ruimte binnen bos`. 
-Also remove stand_type = `naaldhout`?
+Finally, we also remove the plots with stand_type = `open ruimte binnen bos` and`naaldhout`.
 
 ```{r}
+
 vbi_meetpunten_hab_observed_filter5 <- vbi_meetpunten_hab_observed_filter4 %>%
-  filter(!stand_type == "open ruimte binnen bos")
+  filter(!stand_type %in% c("open ruimte binnen bos", "naaldhout"))
   
+prop_type_match <- sum(vbi_meetpunten_hab_observed_filter5$any_match_type) / nrow(vbi_meetpunten_hab_observed_filter5)
+
+prop_main_type_match <- sum(vbi_meetpunten_hab_observed_filter5$any_match_main_type) / nrow(vbi_meetpunten_hab_observed_filter5)
+
 ```
 
+
 ```{r}
+# notes from LG
+# 161026 : plotcentrum valt in een beek, om die reden aangeduid als open ruimte binnen bos cfr ons protocol (jammer genoeg geen foto voorhanden)
+# 207065 : opmerking “wilgenstruweel - heischraal grasland - 9190”: mozaïeksituatie + aangeduid als niet toegankelijk voor de meting
+# 321136 : zeer dicht nat wilgenstruweel
 
 remove_filter5 <- vbi_meetpunten_hab_observed_filter4 %>%
   anti_join(vbi_meetpunten_hab_observed_filter5, by = c("plot_id", "type"))
@@ -329,10 +338,12 @@ remove_filter5 <- vbi_meetpunten_hab_observed_filter4 %>%
 remove_filter5 %>%
   select(plot_id, stand_type, type_observed_std, polygon_id, type, main_type, phab) 
 ```
-
-prop_type_match <- sum(vbi_meetpunten_hab_observed_filter4$any_match_type) / nrow(vbi_meetpunten_hab_observed_filter4)
-
-prop_main_type_match <- sum(vbi_meetpunten_hab_observed_filter4$any_match_main_type) / nrow(vbi_meetpunten_hab_observed_filter4)
+```{r}
+prop_type_match
+```
+```{r}
+prop_main_type_match
+```
 
 Now, for some records we can decide what is the most probable type in case of a mismatch between the observed type and the habitatmap type.
 
@@ -416,23 +427,24 @@ The records with no match should be checked manually, for example using orthopho
 
 ```
 
-## Extra meetpunten voor meetnet habitatkwaliteit
+## Additional sampling units in MHQ
 
-Hier geven we een overzicht van de extra meetpunten die opgemeten werden voor het meetnet habitatkwaliteit in de periode 2015 - 2020.
-
-We baseren ons hiervoor op het git2rdata bestand 'assessments' in [deze repo](https://github.com/inbo/n2khab-mhq-data/tree/master/processed/fieldmap_mhq).
+Based on 'assessments' table in [this repo](https://github.com/inbo/n2khab-mhq-data/tree/master/processed/fieldmap_mhq).
 
 
 ```{r}
-mhq_assessments <- read_vc(file = "assessments", root = "../data/mhq_fieldmap")
-mhq_type_observed <- read_vc(file = "type_observed", root = "../data/mhq_fieldmap") %>%
-  mutate(plot_id = as.character(plot_id))
 
+mhq_assessments <- read_vc(file = "assessments", root = "../data/mhq_fieldmap")
 mhq_assessments_forest <- mhq_assessments %>%
   filter(is.na(sampling_unit_code))
 
-mhq_measured <- mhq_assessments_forest %>%
+mhq_measurements_forest <- mhq_assessments_forest %>%
   filter(lsvi_measurement) %>%
+  filter(!is.na(type_observed)) %>%
+  mutate(grts_ranking = as.numeric(plot_id))
+
+mhq_measured <- mhq_assessments_forest %>%
+  filter(lsvi_measurement) %>% 
   filter(!is.na(type_observed)) %>%
   mutate(type_observed = ifelse(type_observed == "9130", "9130_end", type_observed)) %>%
   group_by(type_observed) %>%
@@ -455,31 +467,51 @@ Ook de resterende punten voor 91E0_sf worden hier niet weergegeven omdat dit doo
 
 ```{r}
 sample_size_to_do <- sample_size_forest %>%
-  left_join(vbi_samplesize_type, by = "type") %>%
-  mutate(n_vbi = ifelse(is.na(n_prob), 0, n_prob)) %>%
-  mutate(n_extra = pmax(0, n_total - n_vbi)) %>%
+  left_join(vbi_samplesize, by = "type") %>%
+  mutate(samplesize_min = ifelse(is.na(samplesize_min), 0, samplesize_min),
+         samplesize_max = ifelse(is.na(samplesize_max), 0, samplesize_max)) %>%
+  mutate(n_extra_min = pmax(0, n_total - samplesize_max),
+         n_extra_max = pmax(0, n_total - samplesize_min)) %>%
   left_join(mhq_measured, by = "type") %>%
   mutate(n_measured_extra = ifelse(is.na(n_measured_extra), 0, n_measured_extra)) %>%
-  mutate(n_extra_todo = pmax(0, n_extra - n_measured_extra))
+  mutate(n_extra_todo_min = pmax(0, n_extra_min - n_measured_extra),
+         n_extra_todo_max = pmax(0, n_extra_max - n_measured_extra),)
 
 sample_size_to_do_anb <- sample_size_to_do %>%
   filter(type != "91E0_sf")
 
-sample_size_to_do_anb_total <- sum(sample_size_to_do_anb$n_extra_todo)
+sample_size_to_do_anb_min_total <- sum(sample_size_to_do_anb$n_extra_todo_min)
+sample_size_to_do_anb_max_total <- sum(sample_size_to_do_anb$n_extra_todo_max)
 
-sample_size_to_do_anb_year <- sample_size_to_do_anb_total/3
+sample_size_to_do_anb_min_year <- sample_size_to_do_anb_min_total/3
+sample_size_to_do_anb_max_year <- sample_size_to_do_anb_max_total/3
+
 
 sample_size_to_do_anb %>%
-  select(type, n_total, n_vbi, n_extra, n_extra_measured = n_measured_extra, n_extra_todo) %>%
+  select(type, n_total,  n_extra_min, n_extra_max, n_extra_measured = n_measured_extra, n_extra_todo_min, n_extra_todo_max) %>%
   kable(digits = 1) %>%
   kable_styling()
+
+samplesize_main_type <- sample_size_to_do_anb %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  group_by(main_type) %>%
+  summarise(n_main_type_max = pmax(0, sum(n_finite_flanders - samplesize_min - n_measured_extra)),
+            n_main_type_min = pmax(0, sum(n_finite_flanders - samplesize_max - n_measured_extra))) %>%
+  ungroup() %>%
+  select(main_type, n_main_type_max, n_main_type_min)
+
+samplesize_subtype <- sample_size_to_do_anb %>%
+  filter(typelevel == "subtype") %>%
+  mutate(n_subtype_max = pmax(0, n_total - samplesize_min - n_measured_extra),
+            n_subtype_min = pmax(0, n_total - samplesize_max - n_measured_extra)) %>%
+  select(type, n_subtype_max, n_subtype_min)
 ```
 
-Het totaal aantal resterende meetpunten voor de 12-jarige meetcyclus bedraagt `r round(sample_size_to_do_anb_total)`.
-Als we dit in de periode 2024 - 2026 willen afwerken, komt dit neer op `r round(sample_size_to_do_anb_year)` meetpunten per jaar.
+The total number of extra sampling units is between `r round(sample_size_to_do_anb_min_total)` and `r round(sample_size_to_do_anb_max_total)`.
+If we want to do this in the period 2024 - 2026, we have to measure `r round(sample_size_to_do_anb_min_year)` and `r round(sample_size_to_do_anb_max_year)` a year.
 
 
-## Steekproeftrekking
+## Drawing the sample
 
 ### Sample frame
 
@@ -503,12 +535,16 @@ check_version %>%
 
 ```
 
-We create population units by overlay the habitatmap with the grts_master (containing the grts-ranking). 
+### Draw sample
+
+We assing a grts_ranking to all population units by overlay the habitatmap with the grts_master (containing the grts-ranking).
+A population unit in a mixed habitatmap polygon has a selection probability = PHAB.
+When a population unit in a mixed habitatmap polygon is selected, but does not contain the target type, it has to be replaced the population unit whithin the same polygon that does contain the target type, with the lowest grts-ranking.
 
 
 ```{r}
 
-if (!file.exists("../output/grts_habmap_points.tsv")) {
+if (!(file.exists("../output/grts_habmap_points.tsv") & file.exists("../output/grts_habmap_points_top250.tsv"))) {
   
   raster_runif <- terra::rast(file.path(fileman_up("n2khab_data"), "20_processed/raster_runif/raster_runif.tif"))
   
@@ -564,25 +600,28 @@ grts_habmap_points2 <- grts_habmap_points %>%
     slice_min(grts_ranking, n = 250) %>%
     ungroup()
   
-  write_vc(grts_habmap_points_top250, file = "grts_habmap_points", 
+  write_vc(grts_habmap_points_top250, file = "grts_habmap_points_top250", 
            root = "../output", 
            sorting = c("type" ,"grts_ranking"), strict = FALSE)
   
-  grts_habmap_points <- grts_habmap_points_top250
+   write_vc(grts_habmap_points, file = "grts_habmap_points", 
+           root = "../output", 
+           sorting = c("type" ,"grts_ranking"), strict = FALSE)
   
 } else {
   
+  grts_habmap_points_top250 <- read_vc(file = "grts_habmap_points_top250", root = "../output")
   grts_habmap_points <- read_vc(file = "grts_habmap_points", root = "../output")
-  
 }
 
-grts_hab91xx <- grts_habmap_points %>%
+grts_hab91xx <- grts_habmap_points_top250 %>%
   filter(str_sub(type, 1, 2) == "91")
 
-
+grts_hab91xx_all <- grts_habmap_points %>%
+  filter(str_sub(type, 1, 2) == "91") %>%
+  semi_join(grts_hab91xx, by = "polygon_id")
 ```
 
-### Assessments
 
 ```{r}
 
@@ -600,23 +639,293 @@ inaccessible <- mhq_assessments %>%
 no_habitat <- mhq_assessments %>%
   filter(str_detect(type_observed, "geen habitat") | type_observed == "9 : bossen")
 
-grts_hab91xx_assessments <- grts_hab91xx %>%
+sampleframe_hab91xx <- grts_hab91xx %>%
   anti_join(no_habitat, by = "grts_ranking") %>% 
   filter(type != "91E0_sf") %>%
   anti_join(inaccessible, by = "grts_ranking") %>%
   left_join(mhq_assessments, by = "grts_ranking") %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+   group_by(grts_ranking) %>%
+  mutate(n_types = n_distinct(type),
+         n_main_types = n_distinct(main_type)) %>%
+  ungroup() %>%
+  mutate(mixed_observed = n_types > 1 & !is.na(type_observed)) 
+
+sampleframe_hab91xx_mixed_observed <- sampleframe_hab91xx %>%
+  filter(mixed_observed) %>%
+  group_by(grts_ranking) %>%
+  mutate(any_match_type = any(type == type_observed),
+         code_orig = str_c(code_orig, collapse = "; ")) %>%
+  ungroup() %>%
+  filter(!(any_match_type & type != type_observed)) %>%
+  group_by(grts_ranking) %>%
+  slice_head(n = 1) %>%
+  ungroup()
+
+sampleframe_hab91xx <- sampleframe_hab91xx %>%
+  filter(!mixed_observed) %>%
+  bind_rows(sampleframe_hab91xx_mixed_observed) %>%
   mutate(source = ifelse(is.na(type_observed), "habitatmap_terr_2023_v1",
                          ifelse(type_observed == type, "habitatmap_terr_2023_v1/assessment_cycle1",
                                 "assessment_cycle1")),
-          phab = ifelse(!is.na(type_observed), 100, phab),
-         type = ifelse(!is.na(type_observed), type_observed, as.character(type))) %>%
-  select(polygon_id, code_orig, grts_ranking, sac, phab, prob, type, type_observed, lsvi_measurement, assessment_source, source) %>%
+         phab = ifelse(!is.na(type_observed), 100, phab),
+         type = ifelse(!is.na(type_observed), type_observed, as.character(type)),
+         ) %>%
+  select(polygon_id, grts_ranking, sac, phab, prob, code_orig, main_type, type, type_observed, lsvi_measurement, assessment_source, date_assessment, cover_species_record, source, x, y, remark) %>% 
   arrange(type, grts_ranking) %>%
   mutate(selection_step1 = prob < phab/100)
 
+ranking_main_type <- sampleframe_hab91xx %>%
+  filter(selection_step1) %>%
+  filter(!lsvi_measurement | is.na(lsvi_measurement)) %>%
+  distinct(grts_ranking, main_type) %>%
+  group_by(main_type) %>%
+  mutate(rank_rel_main_type = rank(grts_ranking)) %>%
+  ungroup()
+  
+sample_hab91xx <- sampleframe_hab91xx %>%
+  filter(selection_step1) %>%
+  filter(!lsvi_measurement | is.na(lsvi_measurement)) %>%
+  left_join(ranking_main_type, by = c("main_type", "grts_ranking")) %>%
+  group_by(type) %>%
+  mutate(rank_rel_subtype = rank(grts_ranking)) %>%
+  ungroup() %>%
+  left_join(samplesize_main_type, by = "main_type") %>%
+  left_join(samplesize_subtype, by = "type") %>%
+  mutate(select_main_type = rank_rel_main_type <= ceiling(n_main_type_max),
+         select_subtype = ifelse(is.na(n_subtype_max), FALSE, rank_rel_subtype <= ceiling(n_subtype_max))) %>%
+  filter(select_main_type | select_subtype) %>%
+  group_by(main_type, grts_ranking) %>%
+  mutate(n_subtypes = n_distinct(type)) %>%
+  ungroup() %>%
+  group_by(grts_ranking) %>%
+  mutate(n_types = n_distinct(type)) %>%
+  ungroup()
+
+```
+
+### Select replacement sampling units
+
+When a sampling unit is visited and it does not contain the target type, it has to be replaced with another sampling unit within the same habitatmap polygon.
+
+We select the potentially suitable replacement sampling units, by selecting all sampling units within a square buffer of 7 x 7 grid cells within the same habitatmap polygon. 
+
+For small habitatmap polygons this results in a limited number of replacement sampling units.
+Therefore we select all sampling units within a habitatmap polygon that contains less than 50 sampling units or in case when there are less than 10 sampling units within the square buffer.
+
+Every replacement sampling unit receives a ranking number corresponding to the raltive ranking:
+
++ according to the grts-ranking within the polygon (one ranking per sampling unit)
++ according to the grts-ranking within the buffer (we get more than one ranking per sampling unit when buffers overlap)
+
+For large habitatmap polygons, the sampling unit with the lowest ranking within the buffer that contains the target type is selected as replacement sampling unit.
+For smaller habitatmap polygons (< 50 sampling units or a buffer with < 10 sampling units) we take the lowest rnaking within the polygon.
+
+Be aware that buffers of the selected sampling units can overlap.
+So avoid selecting a replacement sampling unit that has already been selected for replacing another sampling unit.
+
+
+```{r}
+
+polygons_habitatmap <- habitatmap_terr$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% sample_hab91xx$polygon_id)
+
+su_sf <- sample_hab91xx %>%
+  mutate(x = round(x, 1),
+         y = round(y, 1)) %>%
+  mutate(point_code = str_c(grts_ranking, "_1")) %>%
+  distinct(polygon_id, point_code, x, y) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370)
+i = 1
+
+for (i in 1:nrow(su_sf)) {
+  
+  pol_id <- (su_sf %>%
+    slice(i))$polygon_id
+  
+  p_code <- (su_sf %>%
+    slice(i))$point_code
+  
+  point <- su_sf %>%
+    slice(i) %>%
+    buffer_square(length = 200) %>%
+    st_as_sf() %>%
+    mutate(polygon_id_vervang = pol_id,
+           point_code_vervang = p_code)
+  
+  if (i == 1) {
+    
+    buffers <- point
+    
+  } else {
+    buffers <- bind_rows(buffers,
+                         point)
+  }
+  
+}
+
+st_crs(buffers) <- 31370
+
+polygonen_point_code <- su_sf %>%
+  st_drop_geometry() %>%
+  group_by(polygon_id) %>%
+  summarise(point_code_inpolygon = str_c(point_code, collapse = ";")) %>%
+  ungroup()
+
+vervangpunten <- grts_hab91xx_all %>%
+  distinct(grts_ranking, x, y, polygon_id) %>%
+  semi_join(su_sf, by = "polygon_id") %>%
+  anti_join(sample_hab91xx, by = "grts_ranking") %>% # the already selected sampling units
+  anti_join(no_habitat, by = "grts_ranking") %>% 
+  anti_join(mhq_measurements_forest, by = "grts_ranking") %>% # the already measured sampling units
+  anti_join(inaccessible, by = "grts_ranking") %>%
+  group_by(polygon_id) %>%
+  mutate(n_polygon = n_distinct(grts_ranking)) %>%
+  ungroup() %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(buffers) %>%
+  filter((polygon_id == polygon_id_vervang) | is.na(polygon_id_vervang)) %>% 
+  group_by(polygon_id) %>%
+  mutate(n_buffer = sum(!is.na(polygon_id_vervang))) %>%
+  ungroup() %>%
+  filter((!is.na(polygon_id_vervang)) | (n_buffer <= 10 & n_polygon < 50) ) %>%
+  group_by(polygon_id) %>%
+  mutate(rank_rel_polygon = rank(grts_ranking, ties.method = "min")) %>%
+  ungroup() %>%
+  group_by(polygon_id, point_code_vervang) %>%
+  mutate(rank_rel_buffer = ifelse(!is.na(point_code_vervang), rank(grts_ranking), NA)) %>%
+  ungroup() %>%
+  select(polygon_id, point_code_vervang, grts_ranking, rank_rel_polygon, rank_rel_buffer, n_buffer, n_polygon) %>%
+  left_join(polygonen_point_code, by = "polygon_id") %>%
+  mutate(point_code_vervang = ifelse(is.na(point_code_vervang), point_code_inpolygon, point_code_vervang)) %>%
+  separate_rows(point_code_vervang, sep = ";") %>%
+  select(-point_code_inpolygon) %>%
+  arrange(polygon_id, point_code_vervang, grts_ranking)
+
+```
+
+Below an example of a small polygon: 
+
++ first check if there is a suitable replacment sampling unit within the buffer (yellow points) around the selected sampling unit (red point)
++ if not select a sampling unit outside teh buffer (blue points)
+
+```{r}
+
+p_id <- "391330_v2023"
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id == p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+vervangpunten %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(is.na(rank_rel_buffer), "blue", "yellow")) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(data = sampling_unit, color = "red") %>%
+  addPolygons(data = polygon ) %>%
+  addCircleMarkers(color = ~show_color, label = ~str_c("buffer: ", ifelse(is.na(rank_rel_buffer), "niet in buffer", rank_rel_buffer), "; polygon: ", rank_rel_polygon), labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+```
+
+
+
+Here a big one...
+
+```{r}
+
+multiple_points_per_polygon <- vervangpunten %>%
+  st_drop_geometry() %>%
+  distinct(point_code_vervang, polygon_id) %>%
+  group_by(polygon_id) %>%
+  filter(n() > 1) %>%
+  ungroup()
   
 
+p_id <- (multiple_points_per_polygon %>%
+  slice_head(n = 1))$polygon_id
+
+
+sd <- vervangpunten %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+sd <- SharedData$new(sd)
+
+polygon <- polygons_habitatmap %>%
+  filter(polygon_id == p_id)%>%
+  st_transform(crs = 4326)
+
+sampling_unit <- su_sf %>%
+  filter(polygon_id == p_id) %>%
+  st_transform(4326) 
+
+bscols(
+  list(
+    bscols(
+      widths = c(4, 4),
+      "",
+      filter_select("point_code_vervang", "Code meetpunt", sd, ~point_code_vervang)
+      ),
+    sd %>%
+      leaflet() %>%
+      addTiles() %>%
+      addPolygons(data = polygon ) %>%
+      addCircleMarkers(data = sampling_unit, color = "red", label = ~point_code) %>%
+      addCircleMarkers(color = "yellow", label = ~rank_rel_buffer, labelOptions = labelOptions(noHide = TRUE, textOnly = TRUE))
+  )
+)
+  
+  
+```
+
+## Write results
+
++ lijst of sampling units: 'mhq_forest_cycle1.csv'
+
+```{r}
+polygon_descr <- habmap_polygons %>%
+  st_drop_geometry() %>%
+  select(polygon_id, descritipton_habitatmap = description)
+
+sample_hab91xx_output <- sample_hab91xx %>%
+  mutate(type_meetpunt = ifelse(str_detect(source, "assessment"), "meetpunt al bezocht: habitattype al bepaald", "nieuw meetpunt"),
+         uitvoer_opname = ifelse(select_main_type, "hoofdtype aanwezig", "subtype aanwezig"),
+         x = round(x, 2),
+         y = round(y, 2),
+         point_code = str_c(grts_ranking, "_1")) %>%
+  group_by(point_code, polygon_id, grts_ranking, main_type, type_meetpunt, uitvoer_opname, date_assessment, x, y) %>%
+  summarise(habitattype = str_c(type, collapse = "+")) %>%
+  ungroup() %>% 
+  left_join(polygon_descr, by = "polygon_id") %>%
+  select(point_code, polygon_id, grts_ranking, hoofdtype = main_type, habitattype, everything()) %>%
+  arrange(habitattype, grts_ranking)
+
+write_csv2(sampling_units_panels_anb, "../output/mhq_terr_cyclus2_anb.csv", na = "")
+
+sampling_units_panels_anb %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
 
 
 ```
 
++ vervangpunten: 'mhq_terr_vervangpunten_anb.csv'
+
+```{r}
+vervangpunten_anb <- vervangpunten_out %>%
+  semi_join(sampling_units_panels_anb, by = "polygon_id") %>%
+  mutate(x = round(x_coord, 2),
+         y = round(y_coord, 2)) %>%
+  select(-x_coord, -y_coord)
+
+write_csv2(vervangpunten_anb, "../output/mhq_terr_vervangpunten_anb.csv", na = "")
+
+vervangpunten_anb %>%
+  slice_head(n = 5) %>%
+  datatable(rownames = FALSE)
+```
