@@ -1,0 +1,58 @@
+---
+title: "Monitoring habitat quality scheme for watersurfaces: cycle 2"
+site: bookdown::bookdown_site
+output:
+  bookdown::html_document2:
+    keep_md: TRUE
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+      smooth_scroll: FALSE
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(
+  echo = TRUE,
+  cache = FALSE ,
+  warning = FALSE,
+  message = FALSE
+)
+
+options(rgdal_show_exportToProj4_warnings = "none")
+options(stringsAsFactors = FALSE,
+        scipen = 999, 
+        digits = 15)
+library(sf)
+library(git2rdata)
+library(stars)
+library(raster)
+library(tidyverse)
+library(n2khab)
+library(kableExtra)
+library(units)
+library(leaflet)
+library(units)
+library(renv)
+library(readxl)
+library(INBOtheme)
+library(inbodb)
+library(openssl)
+
+
+conflicted::conflicts_prefer(dplyr::select)
+conflicted::conflicts_prefer(dplyr::filter)
+
+options(stringsAsFactors = FALSE)
+
+```
+
+
+
+
+
+
