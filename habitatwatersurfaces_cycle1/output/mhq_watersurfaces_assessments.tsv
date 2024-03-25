@@ -347,7 +347,7 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16436	LIMHVL0092	31	1	1	field assessment	NA
 16436	LIMHVL0092	33	1	1	field assessment	NA
 16436	LIMHVL0092	34	1	1	field assessment	NA
-16436	LIMHVL0144	30	0	NA	field assessment	NA
+16436	LIMHVL0144	30	NA	NA	NA	long term
 16436	LIMLUM0151	30	0	NA	field assessment	NA
 16436	LIMLUM0240	33	0	NA	field assessment	NA
 16436	LIMMGR0261	34	0	NA	field assessment	NA
@@ -491,7 +491,7 @@ assessment_date	polygon_id	type	is_present	any_habitat	assessment_source	inacces
 16801	ANTMOL0099	33	0	NA	field assessment	NA
 16801	ANTMOL0568	30	1	1	field assessment	NA
 16801	ANTMOL0568	31	1	1	field assessment	NA
-16801	ANTRAV0381	33	1	1	NA	long ter
+16801	ANTRAV0381	33	1	1	NA	long term
 16801	ANTRIJ0005	30	0	NA	field assessment	NA
 16801	ANTRIJ0005	31	1	1	field assessment	NA
 16801	ANTRIJ0030	31	0	NA	field assessment	NA

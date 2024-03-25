@@ -3,12 +3,12 @@
   optimize: yes
   NA string: NA
   sorting: polygon_id
-  hash: 10589f602c9fbf4db8dc97418f54e9b87de37f31
-  data_hash: 2b39fb26b85cecd546ebd71a2025dfe7337c02d6
+  hash: 652fa79b6b844ee4aae935d71761c915da5afd61
+  data_hash: 977019266f3f24c117a6ac910c92d7b9a1555aeb
 polygon_id:
   class: character
 grts_ranking:
-  class: numeric
+  class: integer
 in_object:
   class: logical
 x:

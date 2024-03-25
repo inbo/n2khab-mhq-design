@@ -169,14 +169,14 @@ coord_sample_replaced <- mhq_watersurfaces_refpoints_orig %>%
   st_drop_geometry() %>%
   mutate(x_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
          y_replaced = st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
-  select(-grts_ranking, -code_watersurfaces) %>%
+  select(-grts_ranking) %>%
   rename(pol_id_replaced = pol_id)
 
 coord_sample <- mhq_watersurfaces_refpoints_orig %>%
   st_drop_geometry() %>%
   mutate(x = st_coordinates(mhq_watersurfaces_refpoints_orig)[,1],
          y= st_coordinates(mhq_watersurfaces_refpoints_orig)[,2]) %>%
-  select(-grts_ranking, -code_watersurfaces)
+  select(-grts_ranking)
 
 replacement_31xx <- assessments_mhq_watersurfaces %>%
   filter(str_detect(note, c("verschuiving van|verschoven van"))) %>%

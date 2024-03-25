@@ -324,9 +324,6 @@ refpoints_31xx <- refpoints_31xx_check %>%
 
 ```
 
-
-
-
 ### Reproduce referene points using point_on_surface
 
 We used the point_on_surface function to select reference points for the sampling units.
@@ -353,9 +350,6 @@ check_refpoint_31xx<- check_refpoint_31xx %>%
 
 
 ```
-
-
-
 
 For one 31xx polygon a different point was obtained using point_on_surface which also resulted in a different grts-ranking.
 We will use the original reference point to be able to reproduce the sample.
@@ -459,9 +453,6 @@ watersurfaces_ranking_not_unique <- mhq_watersurfaces_samplingunits %>%
 
 ```
 
-
-
-
 ### Check for sampling units without unique grts_ranking
 
 Not all sampling units have a unique grts-ranking. See map below.
@@ -475,12 +466,7 @@ watersurfaces_ranking_not_unique %>%
   addPolygons(label = ~grts_ranking, color = ~show_color)
 ```
 
-
-
-
-
 Some sampling units selected in 2014 overlap with those of the 2016 sample frame. 
-
 
 ```{r}
 
@@ -500,10 +486,7 @@ sample_2014_overlap %>%
   addPolygons(data = st_transform(sampleframe_2016_overlap, 4326), color = "red")
 ```
 
-
-
-
-```{r, eval = TRUE}
+```{r, eval = FALSE}
 mhq_watersurfaces_samplingunits %>%
   st_write(dsn = "../output/mhq_watersurfaces_original.gpkg", layer = "samplingunits_original", delete_layer = TRUE)
 
