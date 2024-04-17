@@ -1,7 +1,6 @@
 # Update sampling frame
 
-We will update the sampling frame based on the `watersurfaces_hab` (version v4) data source.
-
+We will update the sampling frame based on the `watersurfaces_hab` (version v5) data source.
 
 ```{r}
 watersurfaces_hab <- read_watersurfaces_hab()
@@ -14,7 +13,7 @@ md5 <- file.path(path, file) %>%
   md5() %>%
   str_c(collapse = '')
 
-md5_ref <- "96b6a7abc3d637d71052900970e70904"
+md5_ref <- "8547aebf092e68d198a1b67760548c68"
 
 tibble(
   file = file.path(path, file), md5, md5_ref
@@ -113,7 +112,7 @@ mhq_watersurfaces_populationunits_new <-  watersurfaces_hab_types %>%
   filter(!(polygon_id %in% mhq_watersurfaces_populationunits_3130$polygon_id &
             type == "3130")) %>%
   # filter(!str_detect(polygon_id, "_v")) %>%
-  mutate(source = "watersurfaces_hab_v4") %>%
+  mutate(source = "watersurfaces_hab_v5") %>%
   left_join(select(watersurfaces_refpoints_update, polygon_id, grts_ranking), by = "polygon_id") %>%
   mutate(grts_ranking_draw = grts_ranking,
          sampling_unit_code = polygon_id) 
@@ -165,6 +164,7 @@ check <- watersurfaces_populationunits_select %>%
   filter(n > 1)
 
 ```
+
 ```{r}
 
 sac_sf <- read_admin_areas(dsn = "sac") %>%
@@ -178,17 +178,11 @@ sac_sf <- read_admin_areas(dsn = "sac") %>%
 ```{r}
 
 
-watersurfaces_hab <- read_watersurfaces_hab()
-
-filepath <-  file.path(fileman_up("n2khab_data"), "20_processed/watersurfaces_hab/watersurfaces_hab.gpkg")
-
-check_version <- n2khab::xxh64sum(filepath) == "5792b496a94d0524"
-
 watersurfaces_hab <- watersurfaces_hab$watersurfaces_polygons %>%
   semi_join(watersurfaces_populationunits, by = "polygon_id") %>%
   select(polygon_id)
 
-watersurfaces_extra <- read_watersurfaces(version = "watersurfaces_v1.1") %>%
+watersurfaces_extra <- read_watersurfaces() %>%
   filter(polygon_id %in% watersurfaces_populationunits$polygon_id) %>%
   filter(! polygon_id %in% watersurfaces_hab$polygon_id) %>%
   select(polygon_id)
@@ -210,7 +204,7 @@ watersurfaces_area <- watersurfaces_area_sf %>%
 
 watersurfaces_populationunits <- watersurfaces_populationunits_select %>%
   left_join(watersurfaces_area, by = "polygon_id") %>%
-  select(scheme, sampling_unit_code, polygon_id, area_class, sac, everything())
+  select(sampling_unit_code, polygon_id, area_class, sac, everything())
 
 watersurfaces_populationunits %>%
   write_vc("mhq_watersurfaces_populationunits", root = "../output", sorting = c("type", "grts_ranking_draw", "polygon_id"), strict = FALSE)
@@ -220,6 +214,18 @@ watersurfaces_populationunits %>%
 ```{r}
 watersurfaces_populationunits %>%
   slice(1:5, 400:405)
+```
+
+# Check the result
+
+```{r}
+ws_code_refpoint <- watersurfaces_refpoints %>%
+  anti_join(watersurfaces_populationunits, by = "polygon_id") %>%
+  anti_join(gh, by = "polygon_id") %>%
+  anti_join(remove, by = "polygon_id")
+
+ws_code_refpoint_missing <- watersurfaces_populationunits %>%
+  anti_join(watersurfaces_refpoints_update, by = "polygon_id")
 ```
 
 
