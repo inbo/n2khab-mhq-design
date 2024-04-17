@@ -342,12 +342,11 @@ check_refpoint_31xx <- check_refpoint_31xx %>%
   mutate(x_refpoint_check = st_coordinates(check_refpoint_31xx)[,1],
          y_refpoint_check = st_coordinates(check_refpoint_31xx)[,2])
 
-check_refpoint_31xx<- check_refpoint_31xx %>%
+check_refpoint_31xx <- check_refpoint_31xx %>%
   st_drop_geometry() %>%
   left_join(st_drop_geometry(refpoints_31xx), by = "pol_id") %>%
   mutate(distance = round(sqrt((x_refpoint - x_refpoint_check)^2 + (y_refpoint - y_refpoint_check)^2)),
          grts_ranking_diff = grts_ranking_refpoint != grts_ranking)
-
 
 ```
 
@@ -360,7 +359,6 @@ check_refpoint_31xx %>%
   select(pol_id, grts_ranking_refpoint, grts_ranking_orig = grts_ranking, distance) %>%
   kable() %>%
   kable_styling()
-
 
 ```
 
