@@ -43,7 +43,6 @@ library(INBOtheme)
 library(inbodb)
 library(openssl)
 
-
 conflicted::conflicts_prefer(dplyr::select)
 conflicted::conflicts_prefer(dplyr::filter)
 

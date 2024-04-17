@@ -1,0 +1,65 @@
+# Update standardized tables based on manual check
+
+The first result of the sample was manually checked.
+Some of the selected polygons were assigned as no habitat or inaccessible.
+
+We update the standardized tables `mhq_watersurfaces_assessments` and `mhq_watersurfaces_populationunits` based on this manual check.
+
+```{r}
+mhq_watersurfaces_assessments <- read_vc("mhq_watersurfaces_assessments", root = "../../habitatwatersurfaces_cycle1/output")
+
+mhq_watersurfaces_populationunits <- read_vc("mhq_watersurfaces_populationunits", root = "../../habitatwatersurfaces_cycle1/output")
+```
+
+```{r}
+control_orig <- st_read("../data/steekproef_cyclus_2_manuele_check/standingwater_cycle2_januari2024.shp") %>%
+  st_drop_geometry()
+
+control <- control_orig %>%
+  select(polygon_id, type_all, biotic_mea, abiotic_me, propspectie = Prospectie, meting_bio = MetingBio1, reden_niet_weerhouden = RedenNM2, opm) %>%
+  filter(!is.na(reden_niet_weerhouden)) %>%
+  mutate(any_habitat = ifelse(str_detect(reden_niet_weerhouden, "gh") | reden_niet_weerhouden %in% c("gedempt", "verdwijnt"), FALSE, NA)) %>%
+  mutate(inaccessible = ifelse(str_detect(reden_niet_weerhouden, "priv"), "long term", NA))
+
+gh <- control %>%
+  filter(!is.na(any_habitat)) %>%
+  filter(biotic_mea == 0) %>%
+  mutate(in_sampleframe = polygon_id %in% mhq_watersurfaces_populationunits$polygon_id)
+
+inaccessible <- control %>%
+  filter(!is.na(inaccessible)) %>%
+  mutate(in_sampleframe = polygon_id %in% mhq_watersurfaces_populationunits$polygon_id)
+
+mhq_watersurfaces_assessments_add_gh <- gh %>%
+  select(type = type_all, polygon_id, any_habitat) %>%
+  mutate(assessment_date = as.Date("2024-01-30"),
+         assessment_source = "orthophoto",
+         is_present = FALSE,
+         inaccessible = NA,
+         type = factor(type, levels = levels(mhq_watersurfaces_assessments$type)))
+
+mhq_watersurfaces_assessments_add_inaccessible <- inaccessible %>%
+  select(type = type_all, polygon_id, inaccessible) %>%
+  mutate(assessment_date = as.Date("2024-01-30"),
+         assessment_source = NA,
+         is_present = NA,
+         any_type = NA,
+         type = factor(type, levels = levels(mhq_watersurfaces_assessments$type)))
+
+mhq_watersurfaces_assessments <- mhq_watersurfaces_assessments %>%
+  anti_join(mhq_watersurfaces_assessments_add_gh, by = c("polygon_id", "assessment_date")) %>%
+  anti_join(mhq_watersurfaces_assessments_add_inaccessible, by = c("polygon_id", "assessment_date")) %>%
+  bind_rows(mhq_watersurfaces_assessments_add_gh, mhq_watersurfaces_assessments_add_inaccessible)
+
+mhq_watersurfaces_assessments %>%
+  write_vc(file = "mhq_watersurfaces_assessments", root = "../output", sorting = c("assessment_date", "polygon_id", "type"), strict = FALSE)
+
+mhq_watersurfaces_populationunits <- mhq_watersurfaces_populationunits %>%
+  anti_join(inaccessible, by = "polygon_id") %>%
+  anti_join(mhq_watersurfaces_assessments_add_gh, by = c("type", "polygon_id"))
+
+mhq_watersurfaces_populationunits %>%
+  write_vc(file = "mhq_watersurfaces_populationunits", root = "../output", sorting = c("type", "grts_ranking_draw", "polygon_id"), strict = FALSE)
+
+```
+
