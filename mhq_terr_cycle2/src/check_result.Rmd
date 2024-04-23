@@ -1,0 +1,122 @@
+---
+title: "Meetnet habitatkwaliteit: check planning meetcyclus 2"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+    code_folding: hide
+    warning: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+#devtools::install_github("tlhenvironment/buffeRs")
+library(tidyverse)
+library(git2rdata)
+library(kableExtra)
+library(n2khab)
+library(DT)
+library(sf)
+library(lubridate)
+library(leaflet) 
+library(leaflet.extras)
+library(crosstalk)
+```
+
+
+# Habitatkaart_stdized v2020 en v2023
+
+```{r}
+habmap_stdized_v2023 <- read_habitatmap_stdized()
+
+habmap_stdized_v2020 <- read_habitatmap_stdized(file = file.path(fileman_up("n2khab_data"), "20_processed/_versions/habitatmap_stdized/habitatmap_stdized_2020_v1/habitatmap_stdized.gpkg"))
+```
+
+
+# Steekproef meetcyclus 2
+
+```{r}
+data_path <- "G:/Mijn Drive/Meetnet_habitatkwaliteit/Meetnetontwerp/Terrestrische habitats/Planning_cyclus2"
+
+mhq_terr_cyclus2_anb <- read_csv2(file.path(data_path, "anb/heide_6510/mhq_terr_cyclus2_anb.csv"))
+
+```
+
+# Assessments cyclus 1
+
+```{r}
+data_path <- fileman_up("n2khab-mhq-data")
+
+assessments <- read_vc(file = "processed/fieldmap_mhq/assessments", root = data_path) %>%
+  mutate(grts_ranking_draw = as.numeric(plot_id))
+
+sample_status <- read_vc(file = "processed/fieldmap_mhq/sample_status", root = data_path) %>%
+  mutate(grts_ranking_draw = as.numeric(plot_id))
+
+veg_species <- read_vc(file = "processed/fieldmap_mhq/cover_species", root = data_path) %>%
+  mutate(grts_ranking_draw = as.numeric(plot_id))
+
+type_observed <- read_vc(file = "processed/fieldmap_mhq/type_observed", root = data_path) %>%
+  mutate(grts_ranking_draw = as.numeric(plot_id)) %>%
+  filter(segment_id == 1) %>%
+  mutate(type_observed = ifelse(is.na(type_observed_square), type_observed_circle, type_observed_square))
+
+```
+
+# Check polygong description
+
+```{r}
+check_plots <- c(20217, 78294, 186850, 190902, 328406, 342793, 358930, 857281, 863169, 884022, 905190, 923209, 980625, 1500498, 1793318, 2841894, 2967065, 3811458, 4003090)
+
+```
+
+
+```{r}
+mhq_terr_cyclus2_anb_check <- mhq_terr_cyclus2_anb %>%
+  left_join(st_drop_geometry(habmap_stdized_v2020$habitatmap_polygons), by = "polygon_id") %>%
+  rename(description_orig_2020 = description_orig,
+         polygon_id_2020 = polygon_id) %>%
+  mutate(hoofdtype = as.character(hoofdtype)) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(habmap_stdized_v2023$habitatmap_polygons) %>%
+  st_drop_geometry() %>%
+  rename(description_orig_2023 = description_orig,
+         polygon_id_2023 = polygon_id) %>%
+  mutate(check_presence_2023 = str_detect(description_orig_2023, habitattype) & !is.na(description_orig_2023),
+         check_presence_2020 = str_detect(description_orig_2020, habitattype) & !is.na(description_orig_2020)) %>%
+  select(panel, point_code, grts_ranking_draw, hoofdtype, habitattype, phab, type_meetpunt, datum_opname_cyclus1, description_orig_2020, description_orig_2023, check_presence_2020, check_presence_2023) %>%
+  left_join(select(sample_status, grts_ranking_draw, mon_cycle, date_assessment, status_fieldwork, targethabitat), by = "grts_ranking_draw") %>%
+  left_join(select(type_observed, grts_ranking_draw, type_observed, date_assessment, mon_cycle), by = c("grts_ranking_draw", "mon_cycle", "date_assessment"))
+
+check_nieuw <- mhq_terr_cyclus2_anb_check %>%
+  filter(type_meetpunt == "nieuw meetpunt",
+         !check_presence_2023)
+
+check_all <- mhq_terr_cyclus2_anb_check %>%
+  filter(!check_presence_2023)
+
+check_leen <- mhq_terr_cyclus2_anb_check %>%
+  st_drop_geometry() %>%
+  filter(grts_ranking_draw %in% check_plots)
+
+check_nieuw %>%
+  write_csv2("../output/nieuwe_meetpunten_2023gh.csv", na = "")
+
+check_all %>%
+  write_csv2("../output/alle_meetpunten_2023gh.csv", na = "")
+
+check_leen %>%
+  write_csv2("../output/controle_leen_meetpunten_2023gh.csv", na = "")
+```
+
+```{r}
+veg_species_check_all <- check_all %>%
+  left_join(veg_species, by = c("grts_ranking_draw", "mon_cycle", "date_assessment"))
+
+veg_species_check_all %>%
+  write_csv2("../output/alle_meetpunten_2023gh_vegopname.csv", na = "")
+```
+
