@@ -93,6 +93,14 @@ measurements_vbi <- measurements_vbi %>%
 
 cover_species_vbi <- cover_species_vbi %>%
   select(plot_id = IDPlots, periode = Periode, layer = Layer, name_nl = NameNl, name_sc = NameSc, cover_categ =  Cover_categ, date_veg = DateVeg)
+
+coord_recent <- coordinaten %>%
+  semi_join(cover_species_vbi, by = c("plot_id")) %>%
+  group_by(plot_id) %>%
+  slice_max(periode) %>%
+  ungroup()
+
+#write_csv2(coord_recent, "../output/coord_vbi.csv")
 ```
 
 Based on the coordinates we make an overlay with [habitatmap_terr_2023] ADDLINK
@@ -507,6 +515,56 @@ vbi_habitatmap_not_observed <- vbi_meetpunten_hab %>%
 vbi_habitatmap_not_observed %>%
   write_csv2( "../output/vbi_habitatmap_not_observed.csv")
 ```
+# Manual check and conclusion per plot
+
+In the file [check_vbi_habitatmap_controle.csv](https://drive.google.com/drive/folders/1pqMzRD-wGZCjhgEfRMarRSQpazs9nVnR), the plots with a mismatch between the observed type and the habitatmap are manually checked, and a conclusion is provided.
+We combine this information with (1) the plots with a type match between the vbi assessment and the habitatmap and (2) the plots for which the type has not been assessed in the field (and can only be derived based on the habitatmap).
+This way we get an overview of the types per plot in the forest inventory, based on the best available information.
+
+```{r}
+
+manual_check <- read_csv2("../data/check_vbi_habitatmap_controle.csv")
+
+manual_check <- manual_check %>%
+  select(plot_id, periode, type_vbi = type_obser, type_habmap = type_habit, type_control = Verdict, note_manual_check = Reason) %>%
+  filter(!is.na(type_control)) %>%
+  mutate(type_control = ifelse(type_control == "91E0vn (of gh)", "91E0_vn", type_control),
+         type = ifelse(type_control == "twijfel", type_vbi, type_control),
+         source_vbi = type == type_vbi,
+         source_habmap = str_detect(type_habmap, type),
+         uncertain = type_control == "twijfel",
+         source = str_c("manual_check", ifelse(source_vbi, "/assessment_vbi", ""),
+                        ifelse(source_habmap, "/habitatmap2023", ""))) %>%
+  select(plot_id, periode, type, source, note_manual_check)
+         
+
+```
+
+```{r}
+type_match <- vbi_meetpunten_hab_observed_rule1 %>%
+  filter(!is.na(type_decided)) %>%
+  mutate(source_vbi = type_decided == type_observed_std,
+         source_habmap = type_decided == type,
+         source = ifelse(source_vbi & source_habmap, "assessment_vbi/habitatmap2023",
+                         ifelse(source_vbi, "assessment_vbi", "habitatmap2023"))) %>%
+  select(plot_id, periode, type = type_decided, phab, source)
+```
+
+```{r}
+type_not_assessed <- vbi_meetpunten_hab %>%
+  filter(is.na(type_observed)) %>%
+  filter(str_sub(type, 1, 2) == "91") %>%
+  select(plot_id, periode, type, phab) %>%
+  mutate(source = "habitatmap2023")
+
+type_vbi_conclusion <- manual_check %>%
+  bind_rows(type_match) %>%
+  bind_rows(type_not_assessed) %>%
+  arrange(plot_id) %>%
+  filter(str_sub(type, 1, 2) == "91")
+
+write_csv2(type_vbi_conclusion, "../output/type_observed_vbi.csv", na = "")
+```
 
 # Additional sampling units in MHQ
 
@@ -617,7 +675,7 @@ check_version %>%
 
 ### Draw sample
 
-We assing a grts_ranking to all population units by overlay the habitatmap with the grts_master (containing the grts-ranking).
+We assign a grts_ranking to all population units by overlay the habitatmap with the grts_master (containing the grts-ranking).
 A population unit in a mixed habitatmap polygon has a selection probability = PHAB.
 When a population unit in a mixed habitatmap polygon is selected, but does not contain the target type, it has to be replaced the population unit whithin the same polygon that does contain the target type, with the lowest grts-ranking.
 
