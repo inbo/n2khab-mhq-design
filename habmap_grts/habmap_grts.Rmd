@@ -1,0 +1,161 @@
+---
+title: "Overlay habitatmap_terr with grts_master and raster_unif"
+author: Toon Westra
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+    code_folding: hide
+    warning: FALSE
+date: "2024-03-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(git2rdata)
+library(n2khab)
+library(terra)
+library(kableExtra)
+```
+# Data sources
+
+## Habitatmap 
+
+We make use of [habitatmap_terr_2023_v1](https://zenodo.org/records/13886579).
+
+```{r}
+habmap_terr <- read_habitatmap_terr(keep_aq_types = FALSE)
+
+```
+
+Let's check the version.
+
+```{r}
+check_version <- tibble(version_name = "habitatmap_terr_2023_v1",
+                        md5_zenodo = "0e11e93c909b0044de94326debf3dfce",
+                        md5_file = md5sum(file.path(fileman_up("n2khab_data"), "20_processed/habitatmap_terr/habitatmap_terr.gpkg")))
+
+check_version %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+## GRTS master
+
+We make use of [GRTSmaster_habitats Version 2](https://zenodo.org/records/2682323).
+
+```{r}
+grts_master <- read_GRTSmh()
+
+```
+
+Let's check the version.
+
+```{r}
+check_version <- tibble(version_name = "GRTSmaster_habitats Version 2",
+                        md5_zenodo = "20de76e1abfbafd6edcc00e1a9cf87a0",
+                        md5_file = md5sum(file.path(fileman_up("n2khab_data"), "10_raw/GRTSmaster_habitats/GRTSmaster_habitats.tif")))
+
+check_version %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+## raster_runif
+
+We make use of [raster_runif Version 1](https://zenodo.org/records/4745984).
+
+```{r}
+raster_runif <- terra::rast(file.path(fileman_up("n2khab_data"), "20_processed/raster_runif/raster_runif.tif"))
+
+```
+
+Let's check the version.
+
+```{r}
+check_version <- tibble(version_name = "raster_runif Version 1",
+                        md5_zenodo = "30c725f7de6a9b3ecd71150d42ebef3b",
+                        md5_file = md5sum(file.path(fileman_up("n2khab_data"), "20_processed/raster_runif/raster_runif.tif")))
+
+check_version %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+# Overlay
+
+```{r}
+
+habmap_types <- habmap_terr$habitatmap_terr_types %>%
+  group_by(polygon_id, code_orig) %>%
+    mutate(n = n()) %>%
+  ungroup() %>%
+  group_by(polygon_id, type) %>%
+   summarise(phab = sum(phab/n),
+            code_orig = str_c(code_orig, collapse = "; ")) %>%
+  ungroup()
+  
+habmap_polygons <- habmap_terr$habitatmap_terr_polygons %>%
+  filter(polygon_id %in% habmap_types$polygon_id) 
+  
+types <- read_types() %>%
+  select(type, typelevel, main_type)
+  
+sac <- read_admin_areas(dsn = "sac") %>%
+  select(sac_code)
+  
+grts_habmap_mask <- grts_master %>%
+    crop(habmap_polygons) %>%
+    mask(habmap_polygons) 
+  
+grts_habmap_points <- grts_habmap_mask %>%
+  as.points() %>%
+  st_as_sf()  %>%
+  st_join(habmap_polygons) %>%
+  st_join(sac) %>%
+  mutate(sac = !is.na(sac_code)) %>%
+  dplyr::select(polygon_id, grts_ranking = GRTSmaster_habitats, sac)
+  
+grts_habmap_points2 <- grts_habmap_points %>%
+  mutate(prob = (terra::extract(raster_runif, grts_habmap_points))$raster_runif)
+  
+grts_habmap_points <- grts_habmap_points2 %>%
+  st_drop_geometry() %>%
+  mutate(x = st_coordinates(grts_habmap_points)[,1],
+         y = st_coordinates(grts_habmap_points)[,2])
+  
+grts_habmap_points <- grts_habmap_points %>%
+  filter(!is.na(polygon_id)) %>%
+  left_join(habmap_types, by = "polygon_id")
+  
+grts_habmap_points_top250 <- grts_habmap_points %>%
+  group_by(type) %>%
+  slice_min(grts_ranking, n = 250) %>%
+  ungroup()
+  
+```
+
+# Check result
+
+```{r}
+grts_habmap_points %>%
+  arrange(grts_ranking) %>%
+  head()
+```
+
+# Write result
+
+```{r}
+write_vc(grts_habmap_points, file = "habmap_terr_grts", root = "output", sorting = c("grts_ranking", "type", "code_orig"), strict = FALSE)
+
+write_vc(grts_habmap_points_top250, file = "habmap_terr_grts_250", root = "output", sorting = c("grts_ranking", "type", "code_orig"), strict = FALSE)
+```
+
