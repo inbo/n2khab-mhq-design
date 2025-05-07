@@ -596,6 +596,9 @@ sample_final_wide_sf <- read_watersurfaces() %>%
 sample_final_wide_sf %>%
   st_write("../output/mhq_standingwater_cycle2_2024-04-17.gpkg", delete_dsn = TRUE)
 
+sample_final_wide_sf %>%
+  st_write("../output/mhq_standingwater_cycle2_2024-04-17", driver = "ESRI Shapefile", delete_dsn = TRUE)
+
 watersurfaces_hab <- read_watersurfaces_hab()
 
 watersurfaces_hab_no_ws <- watersurfaces_hab$watersurfaces_types %>%
@@ -610,6 +613,9 @@ watersurfaces_hab_no_ws_sf <- watersurfaces_hab$watersurfaces_polygons %>%
 
 watersurfaces_hab_no_ws_sf %>%
   st_write("../output/habitat_31xx_geen_overlap.gpkg", delete_dsn = TRUE)
+
+watersurfaces_hab_no_ws_sf %>%
+  st_write("../output/habitat_31xx_geen_overlap", driver = "ESRI Shapefile", delete_dsn = TRUE)
 
 ```
 
