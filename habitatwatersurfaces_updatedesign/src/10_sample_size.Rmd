@@ -24,7 +24,7 @@ We will compare the characteristics of following data sources:
 ```{r}
 versie <- "20140324"
 
-watersurfaces_hab_polygons_2014_orig <- read_sf("../../habitatwatersurfaces/data/watersurfaces_2014/BWK_plassen_versie 20140324.shp")
+watersurfaces_hab_polygons_2014_orig <- read_sf("../../habitatwatersurfaces_cycle1/data/watersurfaces_2014/BWK_plassen_versie 20140324.shp")
 
 watersurfaces_hab_polygons_2014 <- watersurfaces_hab_polygons_2014_orig %>%
   mutate(sac = (SBZH == 1) & (!is.na(SBZH))) %>%
@@ -32,7 +32,7 @@ watersurfaces_hab_polygons_2014 <- watersurfaces_hab_polygons_2014_orig %>%
 
 check <- nrow(watersurfaces_hab_polygons_2014) == n_distinct(watersurfaces_hab_polygons_2014$pol_id)
 
-watersurfaces_hab_types_2014_orig <- read.table("../../habitatwatersurfaces/data/watersurfaces_2014/BWK_hab_aq.txt", header=TRUE)
+watersurfaces_hab_types_2014_orig <- read.table("../../habitatwatersurfaces_cycle1/data/watersurfaces_2014/BWK_hab_aq.txt", header=TRUE)
 
 watersurfaces_hab_types_2014 <- watersurfaces_hab_types_2014_orig %>%
   select(pol_id = Pol_ID, shape_area = Shape_Area, code, phab) %>%
@@ -50,7 +50,6 @@ watersurfaces_hab_types_2014 <- watersurfaces_hab_types_2014_orig %>%
   mutate(version = "habitatmap_2014")
 
 ```
-
 
 + Polygons with aquatic habitat types in Habitatmap (version 2020)
 
@@ -84,12 +83,11 @@ watersurfaces_hab_types_2020 <- habitatmap_2020$habitatmap_types %>%
   mutate(version = "habitatmap_2020")
 ```
 
-
 + The [watersurfaces_hab](https://zenodo.org/record/4915849#.YUwy97gzaUk) data source, which is a combination of the watersurfaces map and the standardized habitat map. This data source is also combined with the information on the presence of habitat types in watersurfaces determined during the first monitoring cycle. Watersurfaces where no habitat types were observed are removed. 
 
 ```{r}
 
-root_samplingframe <- "../../habitatwatersurfaces/output" 
+root_samplingframe <- "../../habitatwatersurfaces_cycle1/output" 
 watersurfaces_populationunits <- read_vc(root = root_samplingframe, file = "mhq_watersurfaces_populationunits")
 
 watersurfaces_hab <- read_watersurfaces_hab()
