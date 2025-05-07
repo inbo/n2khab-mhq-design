@@ -46,8 +46,6 @@ opts_chunk$set(
   message = FALSE
 )
 
-# remotes::install_github("inbo/n2khab",
-#                         ref = "dev_0.5.0")
 options(rgdal_show_exportToProj4_warnings = "none")
 options(stringsAsFactors = FALSE,
         scipen = 999, 
@@ -70,6 +68,9 @@ library(openssl)
 library(crosstalk)
 library(DT)
 library(plotly)
+
+conflicted::conflicts_prefer(dplyr::select)
+conflicted::conflicts_prefer(dplyr::filter)
 
 options(stringsAsFactors = FALSE)
 
