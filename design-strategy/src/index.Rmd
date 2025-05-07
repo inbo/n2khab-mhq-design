@@ -69,7 +69,8 @@ opts_chunk$set(
   dpi = 300,
   warning = FALSE
 )
-
+conflicted::conflicts_prefer(dplyr::filter)
+conflicted::conflicts_prefer(dplyr::select)
 ```
 
 
