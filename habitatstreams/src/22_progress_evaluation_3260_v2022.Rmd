@@ -26,9 +26,11 @@ map_3260_new <- read_sf("../data/habitatstreams/v1_7", "BasisbestandSteekproefve
 
 
 ```{r}
-sample_size_3260_v2021 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2021")
+# sample_size_3260_v2021 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2021")
+# 
+# sample_size_3260_v2014 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2014")
 
-sample_size_3260_v2014 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v2014")
+sample_size_3260_v2021 <- read_vc(root =  "../output", file = "mhq_streams_samplesize_v1_7")
 ```
 
 ## Bijgewerkte steekproefgrootteberekening in 2021
@@ -65,7 +67,7 @@ admin <- admin_orig %>%
          sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
                       ifelse(SBZ == 0, "outside", SBZ)),
          type_observed = doelhabitat) %>%
-  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = `reden geen bemonstering`, x_assessment = x, y_assessment = y, position_change = locatie_verschoven)
+  select(field_code = Veldcode, sampling_unit_code, sac_streams, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = `reden geen bemonstering`, x_assessment = x, y_assessment = y, position_change = `locatie SO of SA verschoven (xy aangepast tov origineel aangereikt meetpunt, volgens protocol)`)
 ```
 
 Er wordt gebruik gemaakt van onderstaande klassen:
@@ -296,9 +298,6 @@ mhq_streams_cyclus2 <- planning_cycle2_panels %>%
 
 write_csv2(mhq_streams_cyclus2, "../output/meetpunten3260_cyclus2_versie2022-05-05.csv", na = "")
 ```
-
-
-
 
 ## Output standaardiseren
 
