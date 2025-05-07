@@ -60,7 +60,7 @@ samplesize_main_type %>%
 # Opnames eerste cyclus
 
 ```{r}
-data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr_v2023")
+data_path <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_terr")
 
 mhq_terr_measurements <- read_vc("mhq_terr_measurements", data_path)
 
