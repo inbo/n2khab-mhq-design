@@ -1,0 +1,163 @@
+# Update sample frame
+
+## New 3260 map
+
+The sample frame is based on the 3260 habitat type map (version [habitatstreams_2023](https://zenodo.org/records/10353508)).
+
+In this map following categories were (manually) determined:
+
++ intersecting or downstreams of sac
++ other
+
+The result can be found in the file 'BasisbestandSteekproefvernieuwingHT3260_SBZ_2025.shp', which is stored in [this google drive](https://drive.google.com/drive/folders/1hyhgpxJWa9mSWttgM_l1bDww2r0uEx6-) folder 
+
+```{r}
+map3260 <- st_read("../data/map3260_sbzh_2025/BasisbestandSteekproefvernieuwingHT3260_SBZ_2025.shp")
+
+colnames(map3260) <- str_to_lower(colnames(map3260) )
+```
+
+## Watercourse 100mseg
+
+The data source [watercourse_100mseg](https://zenodo.org/records/4452578) represents all officially known watercourses of the Flemish Region as line segments of 100 m.
+This data source can be used to select sampling units.
+
+```{r}
+watercourse_100mseg <- read_watercourse_100mseg()
+
+watercourse_100mseg_points <- watercourse_100mseg$points
+  
+watercourse_100mseg_lines <- watercourse_100mseg$lines
+```
+
+## Sampling units with 3260 habitat
+
+Workflow:
+
++ 1 meter buffer around 3260 map
++ select all watercourse segments that intersect with 3260 (including buffer)
++ calculate the length of each segment within the 1 meter buffer 3260 map
++ remove segments with length <= 2 meter
+
+```{r}
+
+map3260_buffer1 <- map3260 %>%
+  st_buffer(1)
+
+watercourse_100mseg_3260 <- watercourse_100mseg_lines %>%
+  st_join(map3260_buffer1, largest = TRUE) %>%
+  filter(!is.na(objectid))
+
+watercourse_100mseg_3260intersection <- watercourse_100mseg_lines %>%
+  st_intersection(map3260_buffer1) %>%
+  mutate(length_3260 = st_length(geom))
+
+watercourse_100mseg_prop3260 <- watercourse_100mseg_3260intersection %>%
+  st_drop_geometry() %>%
+  group_by(rank, vhag_code) %>%
+  summarise(prop_3260 = round(sum(drop_units(length_3260)), 0)) %>%
+  ungroup() %>%
+  filter(prop_3260 > 2)
+
+watercourse_100mseg_3260 <- watercourse_100mseg_3260 %>%
+  inner_join(watercourse_100mseg_prop3260, by = c("rank", "vhag_code"))
+
+```
+
+## Check result 
+
++ Are all objects in the 3260 map covered by a watercourse segment?
+
+Following segments are not covered
+
+```{r}
+
+map3260_watercourse <- map3260_buffer1 %>%
+  st_join(select(watercourse_100mseg_3260, rank, prop_3260))
+
+map3260_watercourse %>%
+  filter(is.na(rank)) %>%
+  st_drop_geometry() %>%
+  kable()
+```
+
+```{r}
+map3260_object <- map3260 %>%
+  filter(objectid == 276)
+
+watercourse_100mseg_select <- watercourse_100mseg_lines %>%
+  st_join(st_buffer(map3260_object, 100)) %>%
+  filter(!is.na(objectid))
+
+map3260_object %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines() %>%
+  addPolylines(data = st_transform(watercourse_100mseg_select, 4326), color = "black")
+```
+
++ do we get the expected number of overlapping watercourse segments per 3260 line segment?
+
+```{r}
+length_3260 <- map3260 %>%
+  mutate(length_m = round(drop_units(st_length(geometry)),2),
+         n_expected = ceiling(length_m / 100)) %>%
+  st_drop_geometry() %>%
+  select(objectid,length_m, n_expected)
+
+check_overlap <- map3260_watercourse %>%
+  filter(!is.na(rank)) %>%
+  st_drop_geometry() %>%
+  group_by(objectid) %>%
+  summarise(n_overlap = n_distinct(rank)) %>%
+  ungroup() %>%
+  left_join(length_3260, by = "objectid") %>%
+  mutate(diff_n = abs(n_expected - n_overlap)) %>%
+  filter(diff_n > 1)
+
+check_overlap %>%
+  kable()
+```
+
+
+
+An example where we get less overlapping segments then expected:
+
+```{r}
+map3260_object <- map3260_watercourse %>%
+  filter(objectid == 42)
+
+watercourse_100mseg_select <- watercourse_100mseg_3260 %>%
+  filter(rank %in% map3260_object$rank)
+
+map3260_object %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines() %>%
+  addPolylines(data = st_transform(watercourse_100mseg_select, 4326), color = "black", label = ~prop_3260)
+```
+
+This is OK.
+The 2 extra overlapping segments are covered by other 3260 line segments (resulting in a large prop_3260).
+
+An example where we get more overlapping segments then expected:
+
+```{r}
+map3260_object <- map3260_watercourse %>%
+  filter(objectid == 13)
+
+watercourse_100mseg_select <- watercourse_100mseg_3260 %>%
+  filter(rank %in% map3260_object$rank)
+
+map3260_object %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines() %>%
+  addPolylines(data = st_transform(watercourse_100mseg_select, 4326), color = "black")
+```
+
+This is not OK but only occurs in two occasions.
+
