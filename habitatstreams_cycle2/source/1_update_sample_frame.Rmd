@@ -15,6 +15,10 @@ The result can be found in the file 'BasisbestandSteekproefvernieuwingHT3260_SBZ
 map3260 <- st_read("../data/map3260_sbzh_2025/BasisbestandSteekproefvernieuwingHT3260_SBZ_2025.shp")
 
 colnames(map3260) <- str_to_lower(colnames(map3260) )
+
+map3260 <- map3260 %>%
+  mutate(sac_streams = ifelse(sbz %in% c("intersect SBZ", "sa"), "intersecting or downstream", 
+                              ifelse(sbz == "buiten", "outside", NA)))
 ```
 
 ## Watercourse 100mseg
@@ -30,14 +34,16 @@ watercourse_100mseg_points <- watercourse_100mseg$points
 watercourse_100mseg_lines <- watercourse_100mseg$lines
 ```
 
-## Sampling units with 3260 habitat
+## River segments with 3260 habitat
+
+We want to select all 100 m river segments that contain 3260 habitat.
 
 Workflow:
 
 + 1 meter buffer around 3260 map
 + select all watercourse segments that intersect with 3260 (including buffer)
 + calculate the length of each segment within the 1 meter buffer 3260 map
-+ remove segments with length <= 2 meter
++ remove segments with length <= 2 meter (these are segments that are branches from a 3260 linestring)
 
 ```{r}
 
@@ -81,6 +87,8 @@ map3260_watercourse %>%
   kable()
 ```
 
+One example: Oude Molebeek.
+
 ```{r}
 map3260_object <- map3260 %>%
   filter(objectid == 276)
@@ -122,7 +130,7 @@ check_overlap %>%
 
 
 
-An example where we get less overlapping segments then expected:
+An example where we get more overlapping segments then expected:
 
 ```{r}
 map3260_object <- map3260_watercourse %>%
@@ -142,7 +150,7 @@ map3260_object %>%
 This is OK.
 The 2 extra overlapping segments are covered by other 3260 line segments (resulting in a large prop_3260).
 
-An example where we get more overlapping segments then expected:
+An example where we get less overlapping segments then expected:
 
 ```{r}
 map3260_object <- map3260_watercourse %>%
@@ -160,4 +168,51 @@ map3260_object %>%
 ```
 
 This is not OK but only occurs in two occasions.
+
+## Overall overlap
+
+```{r}
+watercourse_100mseg_3260_lines <- watercourse_100mseg_3260 %>%
+  select(sac_streams, naam, rank, vhag_code,  watercourse_code = wtrlichc, prop_3260)
+
+length_segments <- watercourse_100mseg_3260_lines %>%
+  mutate(length = st_length(geom)) %>%
+  st_drop_geometry() %>%
+  summarise(length = sum(drop_units(length) * prop_3260/ 100 / 1000))
+
+length_map <- map3260 %>%
+  mutate(length = st_length(geometry)) %>%
+  st_drop_geometry() %>%
+  summarise(length = sum(drop_units(length) / 1000))
+
+overlap <- length_segments/length_map
+```
+
+The total length of 3260 habitat in all the selected watercource segments is : `r round(length_segments$length)` km.
+
+The total length of 3260 habitat in the habitat map is : `r round(length_map$length)` km.
+
+The overlap is `r round(overlap * 100, 1)` %.
+
+## Write result
+
+```{r}
+
+check_unique_rank <- (watercourse_100mseg_3260_lines %>%
+  st_drop_geometry() %>%
+  distinct(rank) %>%
+  nrow()) ==
+  (watercourse_100mseg_3260_lines %>%
+  st_drop_geometry()) %>%
+  nrow()
+    
+watercourse_100mseg_3260_points <- watercourse_100mseg_points %>%
+  filter(rank %in% watercourse_100mseg_3260_lines$rank)
+
+watercourse_100mseg_3260_lines %>%
+  st_write(dsn = "../output/watercourse_100mseg_3260.gpkg", "watercourse_100mseg_3260_lines", delete_layer = TRUE)
+
+watercourse_100mseg_3260_points %>%
+  st_write(dsn = "../output/watercourse_100mseg_3260.gpkg", "watercourse_100mseg_3260_points", delete_layer = TRUE)
+```
 

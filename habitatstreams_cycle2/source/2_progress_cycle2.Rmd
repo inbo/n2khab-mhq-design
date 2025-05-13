@@ -42,6 +42,8 @@ admin <- admin_orig %>%
 
 admin_cycle2 <- admin %>%
   filter(assessment_year >= 2022)
+
+
 ```
 
 ## Progress
@@ -51,6 +53,13 @@ sample_cycle2_progress <- sample_cycle2 %>%
   select(-field_code) %>%
   left_join(admin_cycle2, by = "sampling_unit_code") %>%
   mutate(klasse = ifelse(is.na(klasse), "nog niet bemonsterd", klasse))
+
+sample_cycle2_nt_bemonsterd <- sample_cycle2_progress %>%
+  filter(klasse == "nog niet bemonsterd") %>%
+  select(colnames(sample_cycle2))
+
+sample_cycle2_nt_bemonsterd %>%
+  write_csv2("../output/3260_cycle2_niet_bezocht.csv")
 ```
 
 ```{r}
