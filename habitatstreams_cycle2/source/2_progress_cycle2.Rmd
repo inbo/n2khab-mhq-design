@@ -89,8 +89,13 @@ progress_sample_size <- sample_cycle2_progress %>%
                             ifelse(klasse == "nog niet bemonsterd", "to_do", "measured")
                           )) %>%
   group_by(sac_streams, status_su) %>%
-  summarise(n = n()) %>%
+  summarise(n = n_distinct(segment_id)) %>%
   ungroup()
 
+
+progress_sample_size %>%
+  kable() %>%
+  kable_styling()
+  
 ```
 

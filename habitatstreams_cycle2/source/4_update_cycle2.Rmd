@@ -136,7 +136,7 @@ sample_output %>%
 
 ```{r, eval = FALSE}
 sample_output %>%
-  write_csv2("../output/update_steekproef3260_cyclus2.csv")
+  write_csv2("../output/update_meetpunten3260_cyclus2.csv")
 
 sample_not_measured_lines %>%
   st_write("../output/meetpunten_100msegmenten.shp")

@@ -1,0 +1,30 @@
+..generic:
+  git2rdata: 0.5.0
+  optimize: yes
+  NA string: NA
+  sorting:
+  - grts_ranking_draw
+  - rank
+  hash: addf16374c5b0411430cff734c66befd0ad59ab4
+  data_hash: 2bbde0af05f80d916a1ca6f191af3eb7c124cce7
+rank:
+  class: integer
+vhag_code:
+  class: integer
+prop_3260:
+  class: numeric
+  digits: 10
+sac_streams:
+  class: character
+grts_ranking:
+  class: numeric
+  digits: 10
+grts_ranking_draw:
+  class: numeric
+  digits: 10
+segment_id:
+  class: character
+point_code:
+  class: character
+db_ref:
+  class: character

@@ -325,3 +325,12 @@ sampleframe_3260_ranking <- sampleframe_3260_ranking %>%
   
 ```
 
+```{r}
+sampleframe_3260_ranking %>% 
+  write_vc(root = "../output", 
+           file = "sampleframe_3260_grts_ranking",
+           digits = 10,
+           sorting = c("grts_ranking_draw", "rank"))
+```
+
+
