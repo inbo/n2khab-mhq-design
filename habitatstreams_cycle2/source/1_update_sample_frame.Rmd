@@ -32,6 +32,9 @@ watercourse_100mseg <- read_watercourse_100mseg()
 watercourse_100mseg_points <- watercourse_100mseg$points
   
 watercourse_100mseg_lines <- watercourse_100mseg$lines
+
+flanders <- read_admin_areas(dsn = "flanders")
+
 ```
 
 ## River segments with 3260 habitat
@@ -41,7 +44,7 @@ We want to select all 100 m river segments that contain 3260 habitat.
 Workflow:
 
 + 1 meter buffer around 3260 map
-+ select all watercourse segments that intersect with 3260 (including buffer)
++ select all watercourse segments that intersect with 3260 (including buffer) and are within flanders
 + calculate the length of each segment within the 1 meter buffer 3260 map
 + remove segments with length <= 2 meter (these are segments that are branches from a 3260 linestring)
 
@@ -52,7 +55,9 @@ map3260_buffer1 <- map3260 %>%
 
 watercourse_100mseg_3260 <- watercourse_100mseg_lines %>%
   st_join(map3260_buffer1, largest = TRUE) %>%
-  filter(!is.na(objectid))
+  filter(!is.na(objectid)) %>%
+  st_join(st_buffer(flanders, 10)) %>%
+  filter(!is.na(name) | vhag_code == 9501) # Maas
 
 watercourse_100mseg_3260intersection <- watercourse_100mseg_lines %>%
   st_intersection(map3260_buffer1) %>%

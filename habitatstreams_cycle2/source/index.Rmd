@@ -34,6 +34,7 @@ library(kableExtra)
 library(units)
 library(leaflet)
 library(units)
+library(terra)
 
 options(stringsAsFactors = FALSE)
 

@@ -1,0 +1,144 @@
+
+# Select extra sampling units for monitoring cycle 2
+
+## Update mhq_streams_assessments
+
+```{r}
+mhq_streams_assessments_old <- read_vc(root =  "../../habitatstreams/output", file = "mhq_streams_assessments_v2022")
+
+mhq_streams_assessments_new <- sample_cycle2_progress %>%
+  left_join(select(mhq_streams_refpoints, segment_id, point_code, grts_ranking), by = "segment_id") %>%
+  filter(!is.na(assessment_date)) %>%
+  mutate(point_code = ifelse(is.na(point_code), str_c(grts_ranking_draw, "_1"), point_code),
+         grts_ranking = ifelse(is.na(grts_ranking), grts_ranking_draw, grts_ranking), 
+         point_code = ifelse(position_change == "ja", str_c(grts_ranking, "_2"), point_code)) %>%
+  mutate(type_observed = ifelse(type_observed %in% c("gh", "3260"), type_observed, NA),
+         inaccessible = ifelse(klasse == "uitval (ontoegankelijk)", "long term", NA),
+         not_measurable = ifelse(klasse == "uitval (ongeschikt)", "long term",
+                                 ifelse(klasse == "uitval (tijdelijk ongeschikt)", "short term", NA))) %>%
+  select(point_code, segment_id, grts_ranking, grts_ranking_draw, assessment_date, type_observed, inaccessible, not_measurable, reason_no_assessment, x = x_assessment, y = y_assessment, x_orig = x, y_orig = y)
+
+mq_streams_assessments_update <- mhq_streams_assessments_old %>%
+  mutate(not_measurable = ifelse(!measurable, "long term", NA)) %>%
+  filter(!is.na(assessment_date)) %>%
+  bind_rows(mhq_streams_assessments_new) %>%
+  select(point_code, segment_id, assessment_date, type_observed, inaccessible, not_measurable, x , y )
+
+mq_streams_assessments_recent <- mq_streams_assessments_update %>%
+  group_by(segment_id) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup()
+```
+
+
+## Select additional sampling units
+
+We select 40 additional sampling unit per stratum based on grts_ranking_draw.
+
+We include sampling units where habitat 3260 was not observed when:
++ the assessment was performed before 2019
++ the sampling unit is included in version 2023 of the 3260 habitat map 
+
+For the sampling units that have been measured previously, we will select the original 100m segment point.
+for the other sampling units we will select the 100 meter segment points and lines from the new sample frame.
+
+```{r}
+sampleframe_cycle2 <- sampleframe_3260_ranking %>%
+  mutate(in_cycle2 = segment_id %in% sample_cycle2_progress$segment_id) %>%
+  left_join(mq_streams_assessments_recent, by = c("point_code", "segment_id"))
+```
+
+```{r}
+sample_add <- sampleframe_cycle2 %>%
+  filter(prop_3260 > 10) %>%
+  filter(!(in_cycle2 & year(assessment_date) >= 2022)) %>% #nog niet geselecteerd of nog niet bemonsterd in tweede cyclus
+  filter(is.na(inaccessible) | inaccessible != "long term") %>% #toegankelijk
+  filter(is.na(not_measurable) | not_measurable != "long term") %>% #geschikt
+  filter(is.na(type_observed) | type_observed == "3260" | (type_observed  == "gh" & year(assessment_date) < 2019)) %>%
+  group_by(sac_streams) %>%
+  slice_min(order_by = grts_ranking_draw, n = 40) %>%
+  mutate(volgorde = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  arrange(sac_streams, volgorde) 
+```
+
++ For existing sampling units that have been measured we select the original 100 m segment
+
+```{r}
+sample_measured <- sample_add %>%
+  rename(sampling_unit_code = segment_id) %>%
+  filter(!is.na(assessment_date)) %>%
+  filter(type_observed == "3260") %>%
+  mutate(type_meetpunt = "Bestaand meetpunt") %>%
+  select(al_geselecteerd = in_cycle2, volgorde, sampling_unit_code, field_code = db_ref, grts_ranking_draw, sac_streams, type_meetpunt, prop_3260, datum_opname_cyclus1 = assessment_date, x, y)
+
+sample_measured_rank <- sample_add %>%
+  filter(type_observed == "3260") 
+
+sample_measured_lines <- watercourse_100mseg_3260_lines %>%
+  filter(rank %in% sample_measured_rank$rank)
+  
+```
+
++ For other sampling units we select the 100 m watercourse segments of the new sample frame.
+
+```{r}
+
+watercourse_100mseg_3260_coordinates <- watercourse_100mseg_3260_points %>%
+  st_drop_geometry() %>%
+  mutate(x = st_coordinates(watercourse_100mseg_3260_points)[,1],
+         y = st_coordinates(watercourse_100mseg_3260_points)[,2]) %>%
+  select(-vhag_code)
+
+sample_not_measured <- sample_add %>%
+  select(-x, -y) %>%
+  mutate(sampling_unit_code = str_c("2023_",rank)) %>%
+  filter(is.na(assessment_date) | type_observed == "gh") %>%
+  mutate(type_meetpunt = ifelse(is.na(type_observed), "Nieuw meetpunt", "Meetpunt gh ouder dan 6 jaar")) %>%
+  left_join(watercourse_100mseg_3260_coordinates, by = "rank") %>%
+  select(al_geselecteerd = in_cycle2, volgorde, sampling_unit_code, field_code = db_ref, grts_ranking_draw, sac_streams, type_meetpunt, prop_3260, datum_opname_cyclus1 = assessment_date, x, y) 
+
+sample_not_measured_lines <- watercourse_100mseg_3260_lines %>%
+  mutate(sampling_unit_code = str_c("2023_",rank)) %>%
+  filter(sampling_unit_code %in% sample_not_measured$sampling_unit_code)
+  
+```
+
+```{r}
+sample_output <- sample_measured %>%
+  bind_rows(sample_not_measured) %>%
+  arrange(sac_streams, volgorde)
+```
+
+In the map below show
+
++ new sampling units (blue circle and blue line)
++ existing sampling units that have been measured previously (yellow circles) 
++ existing sampling units where 3260 habitat was not observed in an assessment before 2019 (red circles)
+
+```{r}
+
+sample_output %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(type_meetpunt == "Bestaand meetpunt", "yellow",
+                             ifelse(type_meetpunt == "Nieuw meetpunt", "blue", "red"))) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(label = ~sampling_unit_code,
+                   color = ~show_color) %>%
+  addPolylines(data = st_transform(sample_not_measured_lines, 4326), label = ~sampling_unit_code) %>%
+  addPolylines(data = st_transform(sample_measured_lines, 4326), label = ~rank, color = "blue")
+
+```
+
+## Output
+
+```{r, eval = FALSE}
+sample_output %>%
+  write_csv2("../output/update_steekproef3260_cyclus2.csv")
+
+sample_not_measured_lines %>%
+  st_write("../output/meetpunten_100msegmenten.shp")
+```
+

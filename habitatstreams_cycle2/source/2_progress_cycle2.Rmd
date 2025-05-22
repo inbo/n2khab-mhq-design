@@ -36,13 +36,22 @@ admin <- admin_orig %>%
          assessment_date = as.Date(`datum veldbezoek`, format = "%d/%m/%Y"),
          sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
                       ifelse(SBZ == 0, "outside", SBZ)),
-         type_observed = doelhabitat) %>%
+         type_observed = doelhabitat,
+         assessment_date = if_else(is.na(assessment_date), as.Date(str_c(assessment_year, "-01-01")), assessment_date)) %>%
   select(field_code = Veldcode, sampling_unit_code, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = `reden geen bemonstering/ongeschikt`, x_assessment = x, y_assessment = y, position_change = `locatie SO of SA verschoven (xy aangepast tov origineel aangereikt meetpunt, volgens protocol)`) %>%
   filter(!is.na(field_code))
 
 admin_cycle2 <- admin %>%
-  filter(assessment_year >= 2022)
+  filter(assessment_year >= 2022) %>%
+  group_by(field_code) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup()
 
+# replacement
+admin_cycle2 <- admin_cycle2 %>%
+  mutate(sampling_unit_code = ifelse(field_code == "KaaBe_01a", "1_4_772", sampling_unit_code),
+         klasse = ifelse(field_code == "KaaBe_01", "uitval (ongeschikt)", klasse),
+         type_observed = ifelse(field_code == "AntGr_01", "3260", type_observed))
 
 ```
 
