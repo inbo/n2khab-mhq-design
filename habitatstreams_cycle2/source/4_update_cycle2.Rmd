@@ -36,6 +36,7 @@ mq_streams_assessments_recent <- mq_streams_assessments_update %>%
 We select 40 additional sampling unit per stratum based on grts_ranking_draw.
 
 We include sampling units where habitat 3260 was not observed when:
+
 + the assessment was performed before 2019
 + the sampling unit is included in version 2023 of the 3260 habitat map 
 

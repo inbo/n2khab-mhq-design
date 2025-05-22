@@ -73,9 +73,11 @@ check <- watercourse_100mseg_3260_ranking %>%
 ## Add GRTS ranking draw based on original sample frame
 
 The original sample frame `samplingframe_habitatstreams_v1_7` consists of points representing the most downstream point of 100 meter segment. 
-However these segments do not overlap with the watercourse segments of [watercourse_100mseg](https://zenodo.org/records/4452578) data source.
+It is based on [version 1.7 of the 3260 habitat map](https://zenodo.org/records/4420858).
 
-To reproduce the selection of sampling units we will define a variable `grts_ranking_draw` for the 3260 `watercourse_100mseg` segments that overlap with the original sample frame.
+These segment points do not overlap with the watercourse segment points of [watercourse_100mseg](https://zenodo.org/records/4452578) data source.
+
+To reproduce the selection of sampling units in MHQ 3260 we will define a variable `grts_ranking_draw` for the 3260 `watercourse_100mseg` segments that overlap with the original sample frame.
 `grts_ranking_draw` corresponds to the GRTS ranking of the best matching `samplingframe_habitatstreams_v1_7` segment.
 
 The GRTS ranking of measured sampling units is assigned to the `watercourse_100mseg` segment with the largest overlap.
@@ -267,6 +269,11 @@ watercourse_100mseg_ranking_existing <- watercourse_100mseg_existing %>%
 ```
 
 ### Match other sampling units with new sample frame
+
++ First select the watercourse segment lines that intersect with a buffer of 1 meter around the sampling units in the original sample frame
+
++ For each selected watercourse determine the nearest original sampling unit
+
 
 ```{r}
 watercourse_100mseg_overlap2 <- watercourse_100mseg_3260_lines %>%

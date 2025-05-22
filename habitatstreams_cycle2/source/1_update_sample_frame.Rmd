@@ -77,9 +77,7 @@ watercourse_100mseg_3260 <- watercourse_100mseg_3260 %>%
 
 ## Check result 
 
-+ Are all objects in the 3260 map covered by a watercourse segment?
-
-Following segments are not covered
++ Are all objects in the 3260 map covered by a watercourse segment? Following objects are not covered
 
 ```{r}
 
@@ -92,7 +90,10 @@ map3260_watercourse %>%
   kable()
 ```
 
-One example: Oude Molebeek.
+One example is Oude Molebeek:
+
++ the blue line is the 3260 object that does  not overlap with a watercourse segment
++ the black lines are the watercourse segments in a buffer of 100 meters around the 3260 object
 
 ```{r}
 map3260_object <- map3260 %>%
@@ -110,7 +111,30 @@ map3260_object %>%
   addPolylines(data = st_transform(watercourse_100mseg_select, 4326), color = "black")
 ```
 
-+ do we get the expected number of overlapping watercourse segments per 3260 line segment?
+Another example:
+
+The watercourse with 3260 is not included in `watercourse_100mseg`.
+
+```{r}
+map3260_object <- map3260 %>%
+  filter(objectid == 11)
+
+watercourse_100mseg_select <- watercourse_100mseg_lines %>%
+  st_join(st_buffer(map3260_object, 100)) %>%
+  filter(!is.na(objectid))
+
+map3260_object %>%
+  st_transform(4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines() %>%
+  addPolylines(data = st_transform(watercourse_100mseg_select, 4326), color = "black")
+```
+
+
++ do we get the expected number of overlapping watercourse segments per 3260 line segment? 
+
+
 
 ```{r}
 length_3260 <- map3260 %>%
