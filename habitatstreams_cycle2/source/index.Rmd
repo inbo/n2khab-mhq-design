@@ -1,0 +1,47 @@
+
+---
+title: "Update MHQ habitat streams"
+date: "`r lubridate::now()`"
+site: bookdown::bookdown_site
+output:
+  bookdown::html_document2:
+    keep_md: TRUE
+    number_sections: yes
+    fig_caption: yes
+    df_print: paged
+    code_folding: hide
+    toc: TRUE
+    toc_float:
+      collapsed: FALSE
+      smooth_scroll: FALSE
+
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE
+)
+
+library(sf)
+library(git2rdata)
+library(stars)
+library(tidyverse)
+library(n2khab)
+library(kableExtra)
+library(units)
+library(leaflet)
+library(units)
+library(terra)
+
+options(stringsAsFactors = FALSE)
+
+```
+
+
+
+
+
+

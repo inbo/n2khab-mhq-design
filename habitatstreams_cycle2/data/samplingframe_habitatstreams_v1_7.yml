@@ -1,0 +1,17 @@
+..generic:
+  git2rdata: 0.2.1
+  optimize: yes
+  NA string: NA
+  sorting: segment_id
+  hash: 6f118162a6be4b2f0b52097f38e463ad97ddf17f
+  data_hash: 006d313c4fa4055560314eeae70a459229523dfb
+segment_id:
+  class: character
+grts_ranking:
+  class: numeric
+sac_streams:
+  class: character
+x:
+  class: numeric
+'y':
+  class: numeric

@@ -1,0 +1,355 @@
+
+# Select extra sampling units for monitoring cycle 2
+
+## Update mhq_streams_assessments
+
+```{r, eval = FALSE}
+mhq_streams_assessments_old <- read_vc(root =  "../../habitatstreams/output", file = "mhq_streams_assessments_v2022")
+
+mhq_streams_assessments_new <- sample_cycle2_progress %>%
+  left_join(select(mhq_streams_refpoints, segment_id, point_code, grts_ranking), by = "segment_id") %>%
+  filter(!is.na(assessment_date)) %>%
+  mutate(point_code = ifelse(is.na(point_code), str_c(grts_ranking_draw, "_1"), point_code),
+         grts_ranking = ifelse(is.na(grts_ranking), grts_ranking_draw, grts_ranking), 
+         point_code = ifelse(position_change == "ja", str_c(grts_ranking, "_2"), point_code)) %>%
+  mutate(type_observed = ifelse(type_observed %in% c("gh", "3260"), type_observed, NA),
+         inaccessible = ifelse(klasse == "uitval (ontoegankelijk)", "long term", NA),
+         not_measurable = ifelse(klasse == "uitval (ongeschikt)", "long term",
+                                 ifelse(klasse == "uitval (tijdelijk ongeschikt)", "short term", NA))) %>%
+  select(point_code, segment_id, grts_ranking, grts_ranking_draw, assessment_date, type_observed, inaccessible, not_measurable, reason_no_assessment, x = x_assessment, y = y_assessment, x_orig = x, y_orig = y)
+
+mq_streams_assessments_update <- mhq_streams_assessments_old %>%
+  mutate(not_measurable = ifelse(!measurable, "long term", NA)) %>%
+  filter(!is.na(assessment_date)) %>%
+  bind_rows(mhq_streams_assessments_new) %>%
+  select(point_code, segment_id, assessment_date, type_observed, inaccessible, not_measurable, x , y )
+
+mq_streams_assessments_recent <- mq_streams_assessments_update %>%
+  group_by(segment_id) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup()
+```
+
+```{r}
+mhq_streams_assessments <- read_vc(root =  "../data/v2024", file = "mhq_streams_assessments")
+mhq_streams_measurements <- read_vc(root =  "../data/v2024", file = "mhq_streams_measurements")
+mhq_streams_popunits <- read_vc(root =  "../data/v2024", file = "mhq_streams_popunits")
+mhq_streams_refpoints <- read_vc(root =  "../data/v2024", file = "mhq_streams_refpoints") %>%
+  select(point_code, x, y)
+
+mq_streams_assessments_recent <- mhq_streams_assessments %>%
+  group_by(segment_id, point_code) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup()
+```
+
+
+## Select additional sampling units
+
+We select 40 additional sampling unit per stratum based on grts_ranking_draw.
+
+We include sampling units where habitat 3260 was not observed when:
+
++ the assessment was performed before 2019
++ the sampling unit is included in version 2023 of the 3260 habitat map 
+
+For the sampling units that have been measured previously, we will select the original 100m segment point.
+for the other sampling units we will select the 100 meter segment points and lines from the new sample frame.
+
+```{r}
+sampleframe_cycle2 <- sampleframe_3260_ranking %>%
+  mutate(in_cycle2 = segment_id %in% sample_cycle2_progress$segment_id) %>%
+  left_join(mq_streams_assessments_recent, by = c("point_code", "segment_id"))
+```
+
+```{r}
+sample_add <- sampleframe_cycle2 %>%
+  filter(prop_3260 > 10) %>%
+  filter(point_code != "1047854_2") %>% #zeflde grtsranking als een bestaand meetpunt
+  filter(!(in_cycle2 & year(assessment_date) >= 2022)) %>% #nog niet geselecteerd of nog niet bemonsterd in tweede cyclus
+  filter(is.na(inaccessible) | inaccessible != "long term") %>% #toegankelijk
+  filter(is.na(not_measurable) | not_measurable != "long term") %>% #geschikt
+  filter(is.na(is_present) | is_present | ((!is_present) & year(assessment_date) < 2019)) %>%
+  group_by(grts_ranking_draw) %>%
+  mutate(double = n() > 1) %>%
+  ungroup() %>%
+  group_by(sac_streams) %>%
+  slice_min(order_by = grts_ranking_draw, n = 40) %>%
+  mutate(volgorde = rank(grts_ranking_draw)) %>%
+  ungroup() %>%
+  arrange(sac_streams, volgorde) 
+```
+
++ For existing sampling units that have been measured we select the original 100 m segment
+
+```{r}
+sample_measured <- sample_add %>%
+  rename(sampling_unit_code = segment_id) %>%
+  filter(!is.na(assessment_date)) %>%
+  filter(is_present) %>%
+  mutate(type_meetpunt = "Bestaand meetpunt") %>%
+  left_join(mhq_streams_refpoints, by = "point_code") %>%
+  left_join(select(mhq_streams_popunits, point_code, db_ref), by = "point_code") %>%
+  select(al_geselecteerd = in_cycle2, volgorde, sampling_unit_code, point_code, field_code = db_ref, grts_ranking, grts_ranking_draw, sac_streams, type_meetpunt, prop_3260, datum_opname_cyclus1 = assessment_date, x, y)
+
+sample_measured_rank <- sample_add %>%
+  filter(is_present) 
+
+sample_measured_lines <- watercourse_100mseg_3260_lines %>%
+  filter(rank %in% sample_measured_rank$rank)
+  
+```
+
++ For other sampling units we select the 100 m watercourse segments of the new sample frame.
+
+```{r}
+
+watercourse_100mseg_3260_coordinates <- watercourse_100mseg_3260_points %>%
+  st_drop_geometry() %>%
+  mutate(x = st_coordinates(watercourse_100mseg_3260_points)[,1],
+         y = st_coordinates(watercourse_100mseg_3260_points)[,2]) %>%
+  select(-vhag_code)
+
+sample_not_measured <- sample_add %>%
+  mutate(sampling_unit_code = str_c("2023_",rank)) %>%
+  filter(is.na(assessment_date) | (!is_present)) %>%
+  mutate(type_meetpunt = ifelse(is.na(is_present), "Nieuw meetpunt", "Meetpunt gh ouder dan 6 jaar")) %>%
+  left_join(watercourse_100mseg_3260_coordinates, by = "rank") %>%
+  left_join(select(mhq_streams_popunits, point_code, db_ref), by = "point_code") %>%
+  select(al_geselecteerd = in_cycle2, volgorde, sampling_unit_code, point_code, field_code = db_ref, grts_ranking, grts_ranking_draw, sac_streams, type_meetpunt, prop_3260, datum_opname_cyclus1 = assessment_date, x, y) 
+
+sample_not_measured_lines <- watercourse_100mseg_3260_lines %>%
+  mutate(sampling_unit_code = str_c("2023_",rank)) %>%
+  filter(sampling_unit_code %in% sample_not_measured$sampling_unit_code)
+  
+```
+
+```{r}
+sample_output <- sample_measured %>%
+  bind_rows(sample_not_measured) %>%
+  arrange(sac_streams, volgorde)
+```
+
+In the map below show
+
++ new sampling units (blue circle and blue line)
++ existing sampling units that have been measured previously (yellow circles) 
++ existing sampling units where 3260 habitat was not observed in an assessment before 2019 (red circles)
+
+```{r}
+
+sample_output %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_transform(4326) %>%
+  mutate(show_color = ifelse(type_meetpunt == "Bestaand meetpunt", "yellow",
+                             ifelse(type_meetpunt == "Nieuw meetpunt", "blue", "red"))) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(label = ~sampling_unit_code,
+                   color = ~show_color) %>%
+  addPolylines(data = st_transform(sample_not_measured_lines, 4326), label = ~sampling_unit_code) %>%
+  addPolylines(data = st_transform(sample_measured_lines, 4326), label = ~rank, color = "blue")
+
+```
+
+## Output
+
+```{r, eval = FALSE}
+sample_output %>%
+  write_csv2("../output/update_meetpunten3260_cyclus2_2025-07-15.csv")
+
+sample_not_measured_lines %>%
+  st_write("../output/meetpunten_100msegmenten_2025-07-15.shp", delete_layer = TRUE)
+```
+```{r}
+sample_output_orig <- read_csv2("../output/update_meetpunten3260_cyclus2.csv")
+
+check_verwijderd <- sample_output_orig %>%
+  anti_join(sample_output, by = c("grts_ranking_draw", "sampling_unit_code")) %>%
+  mutate(assessed = str_c(grts_ranking_draw, "_1") %in% mhq_streams_assessments$point_code,
+         verandering = "verwijderd",
+         reden = ifelse(assessed, "originele locatie van verplaats punt", 
+                        ifelse(sampling_unit_code == "2023_98889", "nieuw punt dicht bij bestaand punt", "aangepaste selectie")))
+  
+check_toegevoegd <- sample_output %>%
+  anti_join(sample_output_orig, by = "sampling_unit_code") %>%
+  mutate(verandering = "toegevoegd") %>%
+  select(-datum_opname_cyclus1)
+
+verandering <- check_verwijderd %>%
+  bind_rows(check_toegevoegd) %>%
+  select(verandering, reden, sampling_unit_code, volgorde, field_code, sac_streams, type_meetpunt, prop_3260, x, y)
+
+check <- sampleframe_cycle2 %>%
+  semi_join(check_diff, by = "grts_ranking_draw") 
+
+verandering %>%
+  write_csv2("../output/wijziging_2025-07-15.csv")
+  
+```
+
+
+## Update admin tables
+
+### mhq streams refpoints
+
+```{r}
+admin_path <- fileman_up("n2khab-sample-admin")
+
+refpoints_old <- read_vc(root =  "../data/v2024", file = "mhq_streams_refpoints")
+
+refpoints_new <- sample_output %>%
+  select(point_code, segment_id = sampling_unit_code, grts_ranking, type_meetpunt, x, y)
+
+check <- refpoints_new %>%
+  semi_join(refpoints_old, by = "point_code") %>%
+  left_join(select(refpoints_old, point_code, segment_id_orig = segment_id, x_orig = x, y_orig = y), by = "point_code") %>%
+  mutate(dist = sqrt((x - x_orig) ^ 2 + (y - y_orig) ^2) )
+
+#OK
+
+```
+
+The table `mhq_streams_refpoints` defines the point location (the reference point) based on which the grts-ranking is assigned to a watercourse 100m segment.
+Originally the reference points were always the most downstream points of each watercourse segment.
+However, since we use the watercourse segments from the `watercourse_100mseg` this not always the case, since we matched the original reference points to the `watercourse_100mseg` segments.
+
+`mhq_streams_refpoints` has following variables:
+
++ segment_id: the id of the watercourse segment
+  + for watercourse segments that have been previously measured we use the segment_id from `samplingframe_habitatstreams_v1_7` 
+  + for other watercourse segments we create a new id
++ rank: the `rank` (unique id) as defined in the `watercourse_100mseg` data source
+  + when `rank` is missing, this is a watercourse segment in `samplingframe_habitatstreams_v1_7` that does not overlap with the `habitatstreams_2023`
++ segment_id_v1_7: the id of the watercourse segment in `samplingframe_habitatstreams_v1_7` based on which the reference point was originally defined
++ when segment_id_v1_7 is missing, the reference point corresponds with the most downstream point of the `watercourse_100mseg` segment
++ point_code: unique id for the reference point
++ x,y: coordinates (crs = 31370) 
+
+
+```{r}
+refpoints_new_coord <- sampleframe_cycle2 %>%
+  filter(grts_ranking == grts_ranking_draw) %>%
+  filter(is.na(assessment_date)) %>%
+  left_join(watercourse_100mseg_3260_coordinates, by = "rank") %>%
+  select(rank, segment_id, grts_ranking, grts_ranking_draw, sac_streams, prop_3260, point_code, in_cycle2, assessment_date, measured, x, y) %>%
+  mutate(segment_id_new = str_c("2023_", rank))
+  
+refpoints_old_coord <- sampleframe_cycle2 %>%
+  filter((grts_ranking != grts_ranking_draw) |
+           !is.na(assessment_date)) %>%
+  filter(str_sub(point_code, start = -1) == "1") %>%
+  left_join(select(sample_frame_3260_v1_7_orig, segment_id, x, y), by = "segment_id") %>%
+  select(rank, segment_id, grts_ranking, grts_ranking_draw, sac_streams, prop_3260, point_code, in_cycle2, assessment_date, measured, x, y) %>%
+  mutate(grts_ranking = grts_ranking_draw,
+         segment_id_v1_7 = segment_id,
+         segment_id_new = ifelse(measured & !is.na(measured), segment_id, str_c("2023_", rank)))
+
+refpoints_replaced_coord <- sampleframe_cycle2 %>%
+  filter((grts_ranking != grts_ranking_draw) |
+           !is.na(assessment_date)) %>%
+  filter(str_sub(point_code, start = -1) == "2") %>%
+  left_join(select(refpoints_old, point_code, x, y), by = "point_code") %>%
+  select(rank, segment_id, grts_ranking, grts_ranking_draw, sac_streams, prop_3260, point_code, in_cycle2, assessment_date, measured, x, y) %>%
+  mutate(segment_id_v1_7 = segment_id,
+         segment_id_new = ifelse(measured & !is.na(measured), segment_id, str_c("2023_", rank)))
+
+refpoints_replaced_coord <- refpoints_replaced_coord %>%
+  st_as_sf(coords = c("x","y"), crs = 31370, remove = FALSE) 
+
+refpoints_replaced_coord <- refpoints_replaced_coord %>%
+  mutate(grts_ranking_check = (terra::extract(grts_master, refpoints_replaced_coord))$GRTSmaster_habitats) %>%
+  mutate(grts_ranking = grts_ranking_check) %>%
+  st_drop_geometry()
+  
+refpoints_old_keep <- refpoints_old %>%
+  anti_join(refpoints_old_coord, by = "point_code") %>%
+  anti_join(refpoints_replaced_coord, by = "point_code") %>%
+  mutate(segment_id_new = segment_id,
+         segment_id_v1_7 = segment_id)
+
+# these are the assessed sampling units that do not overlap with the v2023 3260 habitatmap
+check2 <- mhq_streams_assessments %>%
+  anti_join(refpoints_old_coord, by = "point_code") %>%
+  left_join(sample_units_missing, by = "point_code")
+  
+refpoints_update <- refpoints_new_coord %>%
+  bind_rows(refpoints_old_coord) %>%
+  bind_rows(refpoints_replaced_coord) %>%
+  bind_rows(refpoints_old_keep) %>%
+  select(segment_id = segment_id_new, rank, segment_id_v1_7, point_code, grts_ranking, x, y) %>%
+  arrange(grts_ranking)
+
+check <- refpoints_update %>%
+  group_by(point_code) %>%
+  filter(n() > 1)
+
+check_ranking <- refpoints_update %>%
+  st_as_sf(coords = c("x","y"), crs = 31370)
+
+# grts-ranking of some replaced sampling units are not ok
+check_ranking <- check_ranking %>%
+  mutate(grts_ranking_check = (terra::extract(grts_master, check_ranking))$GRTSmaster_habitats) %>%
+  filter(grts_ranking != grts_ranking_check)
+
+```
+
+```{r}
+refpoints_update %>%
+  write_vc(file = "mhq_streams_refpoints",
+           root = "../output",
+           digits = 20,
+           sorting = c("grts_ranking", "point_code"))
+```
+### Population units
+
+```{r}
+mhq_streams_popunits_add <- sample_output %>%
+  filter(!al_geselecteerd) %>%
+  select(point_code, segment_id = sampling_unit_code, grts_ranking, grts_ranking_draw, sac_streams, db_ref = field_code) %>%
+  mutate(grts_ranking = grts_ranking_draw,
+         type = "3260",
+         is_active = TRUE,
+         legacy_site = FALSE,
+         date = as.Date("2025-06-15"))
+  
+mhq_streams_popunits_update <- mhq_streams_popunits %>%
+  bind_rows(mhq_streams_popunits_add) %>%
+  group_by(point_code) %>%
+  filter(date == max(date)) %>%
+  ungroup()
+
+check <- mhq_streams_popunits_update %>%
+  group_by(point_code) %>%
+  filter(n() > 1)
+```
+
+```{r}
+mhq_streams_popunits_update %>%
+  write_vc(file = "mhq_streams_popunits",
+           root = "../output",
+           digits = 20,
+           sorting = c("grts_ranking_draw", "point_code"))
+```
+
+## Output sample frame
+
+```{r}
+sampleframe_3260 <- refpoints_new_coord %>%
+  bind_rows(refpoints_old_coord) %>%
+  bind_rows(refpoints_replaced_coord) %>%
+  select(segment_id = segment_id_new, rank, segment_id_v1_7, prop_3260, sac_streams, point_code, grts_ranking, grts_ranking_draw) %>%
+  arrange(sac_streams, grts_ranking_draw)
+
+check <- sampleframe_3260 %>%
+  filter(grts_ranking != grts_ranking_draw)
+```
+
+```{r}
+sampleframe_3260 %>%
+  write_vc(root = "../output", 
+           file = "sampleframe_3260_grts_ranking",
+           digits = 10,
+           sorting = c("grts_ranking_draw", "rank"),
+           strict = FALSE)
+```

@@ -1,0 +1,101 @@
+# Progress cycle 2
+
+The second monitoring cycle of the 3260 mhq scheme started in 2022 and last until 2027.
+
+It appears that many of the selected sampling units do not contain 3260 habitat. Therefore we have to select new sampling units to achieve a sufficient sample size.
+
+## Selected sampling units
+
+The file 'meetpunten3260_cyclus2_versie2022-05-05.csv' list the selected sampling units for cycle 2.
+The file can be found in this [google drive folder](https://drive.google.com/drive/folders/1UNKCLEgiYq2r6EkfWXMkppSDraPcqfAU).
+
+```{r}
+sample_cycle2 <- read_csv2("../data/meetpunten3260_cyclus2_versie2022-05-05.csv")
+```
+```{r}
+sample_cycle2 %>%
+  group_by(sac_streams) %>%
+  summarize(sample_size = n()) %>%
+  ungroup() %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+
+## Administration
+
+The file 'Monitoring3260_SVZ2024_voorToonWestra.csv' contains the progress of the field work.
+It can be found in this [google drive folder](https://drive.google.com/drive/folders/1DHLwdrp7i_rIwIfrj3-Tm_yXhvdm19D4).
+
+```{r}
+admin_orig <- read_csv2("../data/Monitoring3260_SVZ2024_voorToonWestra.csv")
+
+admin <- admin_orig %>%
+  mutate(assessment_year = `jaar monitoring`,
+         assessment_date = as.Date(`datum veldbezoek`, format = "%d/%m/%Y"),
+         sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
+                      ifelse(SBZ == 0, "outside", SBZ)),
+         type_observed = doelhabitat,
+         assessment_date = if_else(is.na(assessment_date), as.Date(str_c(assessment_year, "-01-01")), assessment_date)) %>%
+  select(field_code = Veldcode, sampling_unit_code, assessment_year, assessment_date, type_observed, klasse, reason_no_assessment = `reden geen bemonstering/ongeschikt`, x_assessment = x, y_assessment = y, position_change = `locatie SO of SA verschoven (xy aangepast tov origineel aangereikt meetpunt, volgens protocol)`) %>%
+  filter(!is.na(field_code))
+
+admin_cycle2 <- admin %>%
+  filter(assessment_year >= 2022) %>%
+  group_by(field_code) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup()
+
+# replacement
+admin_cycle2 <- admin_cycle2 %>%
+  mutate(sampling_unit_code = ifelse(field_code == "KaaBe_01a", "1_4_772", sampling_unit_code),
+         klasse = ifelse(field_code == "KaaBe_01", "uitval (ongeschikt)", klasse),
+         type_observed = ifelse(field_code == "AntGr_01", "3260", type_observed))
+
+```
+
+## Progress
+
+```{r}
+sample_cycle2_progress <- sample_cycle2 %>%
+  select(-field_code) %>%
+  left_join(admin_cycle2, by = "sampling_unit_code") %>%
+  mutate(klasse = ifelse(is.na(klasse), "nog niet bemonsterd", klasse))
+
+sample_cycle2_nt_bemonsterd <- sample_cycle2_progress %>%
+  filter(klasse == "nog niet bemonsterd") %>%
+  select(colnames(sample_cycle2))
+
+sample_cycle2_nt_bemonsterd %>%
+  write_csv2("../output/3260_cycle2_niet_bezocht.csv")
+```
+
+```{r}
+progress_cycle2 <- sample_cycle2_progress %>%
+  group_by(klasse, reason_no_assessment) %>%
+  summarise(n_sampling_units = n()) %>%
+  ungroup() 
+
+progress_cycle2 %>%
+  kable() %>%
+  kable_styling()
+```
+
+```{r}
+progress_sample_size <- sample_cycle2_progress %>%
+  mutate(status_su = ifelse(!is.na(reason_no_assessment), 
+                            ifelse(klasse == "niet meetellen (is vervangen)", "replaced", "not_measured"),
+                            ifelse(klasse == "nog niet bemonsterd", "to_do", "measured")
+                          )) %>%
+  group_by(sac_streams, status_su) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+
+progress_sample_size %>%
+  kable() %>%
+  kable_styling()
+  
+```
+

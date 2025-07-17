@@ -64,6 +64,7 @@ admin <- admin_orig %>%
   mutate(#sampling_unit_code = str_c("1_4_", IDToonW),
          assessment_year = `jaar monitoring`,
          assessment_date = as.Date(`datum veldbezoek`, format = "%d/%m/%Y"),
+         assessment_date = if_else(is.na(assessment_date), as.Date(str_c(assessment_year, "-01-01")), assessment_date),
          sac_streams = ifelse(SBZ == 1, "intersecting or downstream",
                       ifelse(SBZ == 0, "outside", SBZ)),
          type_observed = doelhabitat) %>%
@@ -296,7 +297,7 @@ mhq_streams_cyclus2 <- planning_cycle2_panels %>%
   select(sampling_unit_code, field_code, punt_verplaatst, grts_ranking_draw = grts_ranking, sac_streams, type_meetpunt, punt_verplaatst, datum_opname_cyclus1 = assessment_date, jaar_cyclus2, x, y ) %>%
   arrange(jaar_cyclus2, grts_ranking_draw)
 
-write_csv2(mhq_streams_cyclus2, "../output/meetpunten3260_cyclus2_versie2022-05-05.csv", na = "")
+#write_csv2(mhq_streams_cyclus2, "../output/meetpunten3260_cyclus2_versie2022-05-05.csv", na = "")
 ```
 
 ## Output standaardiseren
@@ -307,7 +308,7 @@ We standaardiseren het overzicht van de steekproefeenheden en de opmetingen op e
 grts_master <- read_GRTSmh()
 
 sample_assessments_3260_2 <- sample_assessments_3260 %>%
-  filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do$sampling_unit_code) %>%
+  filter(!is.na(klasse) | sampling_unit_code %in% sample_units_to_do2021$sampling_unit_code) %>%
   mutate(grts_ranking_draw =grts_ranking,
          type_target = "3260",
          scheme = "MHQ3260",
@@ -323,10 +324,11 @@ sample_assessments_3260_replaced <- sample_assessments_3260_2 %>%
   mutate(x = x_assessment,
          y = y_assessment) %>%
   st_as_sf(coords = c("x_assessment", "y_assessment"), crs = 31370) %>%
-  mutate(grts_ranking = grts_master[as(., "Spatial")],
-         point_code = str_c(grts_ranking_draw, "_2")) %>%
-  st_drop_geometry()
+  mutate(point_code = str_c(grts_ranking_draw, "_2"))
 
+sample_assessments_3260_replaced <- sample_assessments_3260_replaced %>%
+  mutate(grts_ranking = (terra::extract(grts_master, sample_assessments_3260_replaced))$GRTSmaster_habitats) %>%
+  st_drop_geometry()
 
 sample_assessments_3260_original <- sample_assessments_3260_2 %>%
   mutate(field_code = ifelse(position_change, NA, field_code),
@@ -386,7 +388,7 @@ mhq_streams_refpoints %>%
 
 
 ```{r}
-#write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE)
+write_vc(mhq_streams_refpoints, file = "mhq_streams_refpoints_v2022", root = "../output", sorting = c("sampling_unit_code", "point_code"), strict = FALSE, digits = 10)
 ```
 
 ### mhq_streams_refpoints_validity
@@ -426,7 +428,7 @@ mhq_streams_refpoints_validity %>%
 ```
 
 ```{r}
-#write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity", root = "../output", sorting = c("sampling_unit_code", "point_code"))
+write_vc(mhq_streams_refpoints_validity, file = "mhq_streams_refpoints_validity_v2022", root = "../output", sorting = c("sampling_unit_code", "point_code"), digits = 10)
 ```
 
 ### mhq_streams_assessments
@@ -468,7 +470,7 @@ mhq_streams_assessments %>%
 
 
 ```{r}
-#write_vc(mhq_streams_assessments, file = "mhq_streams_assessments", root = "../output", sorting = c("point_code"), strict = FALSE)
+write_vc(mhq_streams_assessments, file = "mhq_streams_assessments_v2022", root = "../output", sorting = c("point_code"), strict = FALSE, digits = 10)
 ```
 
 
