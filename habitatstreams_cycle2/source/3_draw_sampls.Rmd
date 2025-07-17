@@ -110,7 +110,7 @@ sample_cycle2_keep <- sample_cycle2_progress %>%
 
 ```
 
-```{r}
+```{r, eval =FALSE}
 mhq_streams_refpoints_validity <- read_vc(root =  "../../habitatstreams/output", file = "mhq_streams_refpoints_validity_v2022")
 
 mhq_streams_valid <- mhq_streams_refpoints_validity %>%
@@ -137,6 +137,29 @@ sample_unit_keep <- sample_cycle2_keep %>%
 
 ``` 
 
+```{r}
+mhq_streams_assessments <- read_vc(root =  "../data/v2024", file = "mhq_streams_assessments")
+mhq_streams_refpoints <- read_vc(root =  "../data/v2024", file = "mhq_streams_refpoints") %>%
+  select(point_code, x, y)
+mhq_streams_popunits <- read_vc(root =  "../data/v2024", file = "mhq_streams_popunits")
+
+mhq_streams_assessments_recent <- mhq_streams_assessments %>%
+  group_by(segment_id, point_code) %>%
+  filter(assessment_date == max(assessment_date)) %>%
+  ungroup() %>%
+  left_join(mhq_streams_refpoints, by = "point_code") %>%
+  left_join(select(mhq_streams_popunits, point_code, sac_streams, grts_ranking_draw), by = "point_code") %>%
+  select(point_code, segment_id, grts_ranking_draw, sac_streams, x, y)
+
+sample_unit_keep <- mhq_streams_assessments_recent %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  group_by(geometry) %>%
+  mutate(dist_to_3260map = round(min(st_distance(map3260, geometry)), 1 )) %>%
+  ungroup() %>%
+  filter(!segment_id == "1_7_27869") #foutief punt
+```
+
+
 
 ### Overlay measured sampling units with new sample frame
 
@@ -151,7 +174,7 @@ watercourse_100mseg_overlap <- watercourse_100mseg_3260_lines %>%
 # select the most upstream segment
 max_ranking <- watercourse_100mseg_overlap %>%
   st_drop_geometry() %>%
-  group_by(segment_id) %>%
+  group_by(segment_id, point_code) %>%
   filter(rank == max(rank)) %>%
   ungroup()
 
@@ -159,7 +182,7 @@ watercourse_100mseg_overlap_unique <- watercourse_100mseg_overlap %>%
   filter(rank %in% max_ranking$rank)
 
 sample_units_missing <- sample_unit_keep %>%
-  filter(! segment_id %in% watercourse_100mseg_overlap$segment_id)
+  filter(!segment_id %in% watercourse_100mseg_overlap$segment_id)
 ```
 
 Possibly a segment starting from an existing sampling unit (point) will have a larger overlap with a more upstream watercourse segment (which it does not overlap with). 
@@ -171,7 +194,7 @@ Therefore we:
 ```{r}
 watercourse_100mseg_3260_points_overlap <- watercourse_100mseg_3260_points %>%
   filter(rank %in% c(watercourse_100mseg_overlap_unique$rank, watercourse_100mseg_overlap_unique$rank + 1)) %>%
-  st_join(select(sample_unit_keep, segment_id ,sac_streams, grts_ranking_draw), join = st_nearest_feature) %>%
+  st_join(select(sample_unit_keep, segment_id, point_code, sac_streams, grts_ranking_draw), join = st_nearest_feature) %>%
   group_by(geom) %>%
   mutate(dist = round(min(st_distance(geom, sample_unit_keep)), 1)) %>%
   ungroup()
@@ -246,46 +269,83 @@ sample_unit_orig %>%
 
 ```{r}
 watercourse_100mseg_existing <- watercourse_100mseg_3260_points_overlap %>%
-  group_by(segment_id) %>%
+  group_by(segment_id, point_code) %>%
   filter(dist == min(dist)) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(sampleframe = "v1_7")
 
 ### add grts_ranking: for some sampling units location is replaced
 
-mhq_streams_invalid <- mhq_streams_refpoints_validity %>%
-  filter(!is_valid)
+# mhq_streams_invalid <- mhq_streams_refpoints_validity %>%
+#   filter(!is_valid)
+# 
+# grts_ranking_orig <- mhq_streams_refpoints %>%
+#   anti_join(mhq_streams_invalid, by = "point_code") %>%
+#   select(segment_id, grts_ranking)
+# 
+# watercourse_100mseg_ranking_existing <- watercourse_100mseg_existing %>%
+#   st_drop_geometry() %>%
+#   select(rank, vhag_code, segment_id, sac_streams, grts_ranking_draw) %>%
+#   left_join(grts_ranking_orig,
+#             by = "segment_id") %>%
+#   mutate(grts_ranking = ifelse(is.na(grts_ranking), grts_ranking_draw, grts_ranking),
+#          sampleframe = "v1_7") 
 
-grts_ranking_orig <- mhq_streams_refpoints %>%
-  anti_join(mhq_streams_invalid, by = "point_code") %>%
-  select(segment_id, grts_ranking)
-
-watercourse_100mseg_ranking_existing <- watercourse_100mseg_existing %>%
-  st_drop_geometry() %>%
-  select(rank, vhag_code, segment_id, sac_streams, grts_ranking_draw) %>%
-  left_join(grts_ranking_orig,
-            by = "segment_id") %>%
-  mutate(grts_ranking = ifelse(is.na(grts_ranking), grts_ranking_draw, grts_ranking),
-         sampleframe = "v1_7") 
+watercourse_100mseg_ranking_existing <- watercourse_100mseg_existing
 ```
 
 ### Match other sampling units with new sample frame
 
-+ First select the watercourse segment lines that intersect with a buffer of 1 meter around the sampling units in the original sample frame
++ First we simply match based on grts-ranking 
+
++ Then we select the watercourse segment lines that intersect with a buffer of 1 meter around the sampling units in the original sample frame
 
 + For each selected watercourse determine the nearest original sampling unit
 
 
 ```{r}
-watercourse_100mseg_overlap2 <- watercourse_100mseg_3260_lines %>%
-  st_join(st_buffer(select(sample_frame_3260_v1_7, segment_id, grts_ranking), dist = 1)) %>%
-  filter(!is.na(segment_id)) %>%
-  st_join(select(sample_frame_3260_v1_7, segment_id_nearest = segment_id),
-          join = st_nearest_feature) %>%
-  mutate(check = segment_id == segment_id_nearest)
 
+# these are the grts-rankings of the original sampling frame that have to be assigned to the sampling units of the new sampling frame
+remaining_grts <- sample_frame_3260_v1_7 %>%
+  st_drop_geometry() %>%
+  filter(!grts_ranking %in% watercourse_100mseg_ranking_existing$grts_ranking_draw) %>%
+  select(segment_id, grts_ranking) 
+
+# these are the sampling units of the new sampling frame that occur in the original sampling frame
+# grts_ranking = grts_ranking_draw
+match_grts <- watercourse_100mseg_3260_ranking %>%
+  semi_join(remaining_grts, by = c("grts_ranking")) %>%
+  anti_join(watercourse_100mseg_ranking_existing, by = "rank") %>%
+  group_by(grts_ranking) %>%
+  mutate(existing_grts = TRUE,
+         point_code = str_c(grts_ranking, "_", rank(rank))) %>%
+  ungroup()
+
+check <- match_grts %>%
+  group_by(grts_ranking) %>%
+  filter(n() > 1)
+
+# the remaining grts-rankings that have not been assigned to the sampling units of the new sampling frame
+remaining_grts <- sample_frame_3260_v1_7 %>%
+  filter(!grts_ranking %in% watercourse_100mseg_ranking_existing$grts_ranking_draw) %>%
+  filter(!grts_ranking %in% match_grts$grts_ranking)
+
+# the sampling units of the new sampling frame (with rank as unique id ) that overlap with a buffer of 1 meter around the remaining grts-rankings in the original sampling frame (with segment_id as unique id)
+  
+watercourse_100mseg_overlap2 <- watercourse_100mseg_3260_lines %>%
+  filter(!rank %in% watercourse_100mseg_ranking_existing$rank) %>%
+  filter(!rank %in% match_grts$rank) %>%
+  st_join(st_buffer(select(remaining_grts, segment_id, grts_ranking), dist = 1)) %>%
+  filter(!is.na(segment_id)) %>%
+  st_join(select(remaining_grts, segment_id_nearest = segment_id),
+          join = st_nearest_feature) %>%
+  mutate(check = segment_id == segment_id_nearest,
+         point_code = str_c(grts_ranking, "_1"))
+
+# when 2 su of the new sf overlap with the same su of the original sf, we select the su with the highest rank
+# when 1 su of the new sf overlaps with more than 1 su of the original sf, we select the closest su
 watercourse_100mseg_overlap2 <- watercourse_100mseg_overlap2 %>%
   st_drop_geometry() %>%
-  filter(!rank %in% watercourse_100mseg_ranking_existing$rank) %>%
   group_by(segment_id) %>%
   filter(rank == max(rank)) %>%
   ungroup() %>%
@@ -294,18 +354,29 @@ watercourse_100mseg_overlap2 <- watercourse_100mseg_overlap2 %>%
   ungroup() %>%
   filter(!((n_overlap > 1) & 
              (segment_id != segment_id_nearest))) %>%
-  filter(!grts_ranking %in% watercourse_100mseg_ranking_existing$grts_ranking_draw)
+  filter(!grts_ranking %in% watercourse_100mseg_ranking_existing$grts_ranking_draw) %>%
+  filter(!grts_ranking %in% match_grts$grts_ranking) %>%
+  mutate(existing_grts = FALSE)
 
+check <- watercourse_100mseg_overlap2 %>%
+  st_drop_geometry() %>%
+  semi_join(watercourse_100mseg_ranking_existing, by = "point_code") 
+
+watercourse_100mseg_overlap2 <- watercourse_100mseg_overlap2 %>%
+  bind_rows(match_grts) %>%
+  st_drop_geometry()
 ```
 
 ## Create sample frame
 
 ```{r}
 
+# all matches between orignal su (segment_id) and new su (rank)
 combine_grts_ranking_draw <- watercourse_100mseg_ranking_existing %>%
   bind_rows(watercourse_100mseg_overlap2 %>%
               rename(grts_ranking_draw = grts_ranking)) %>%
-  select(rank, grts_ranking_draw, segment_id)
+  st_drop_geometry() %>%
+  select(rank, grts_ranking_draw, segment_id, point_code)
 
 check <- combine_grts_ranking_draw %>%
   filter(n() > 1,
@@ -313,31 +384,42 @@ check <- combine_grts_ranking_draw %>%
 
 check <- combine_grts_ranking_draw %>%
   filter(n() > 1,
-        .by = grts_ranking_draw)
-  
+        .by = c(grts_ranking_draw, point_code))
+
+# all matches between orignal su (segment_id) 
 sampleframe_3260_ranking <- watercourse_100mseg_3260_ranking %>%
   mutate(sampleframe = "v2023") %>%
   left_join(combine_grts_ranking_draw, by = "rank") %>%
-  mutate(grts_ranking_draw = ifelse(is.na(grts_ranking_draw), grts_ranking, grts_ranking_draw)) %>%
-  select(rank, vhag_code, prop_3260, sac_streams, grts_ranking, grts_ranking_draw, segment_id) 
+  mutate(grts_ranking_draw = ifelse(is.na(grts_ranking_draw), grts_ranking, grts_ranking_draw),
+         new_point_code = is.na(point_code)) %>%
+  group_by(grts_ranking_draw) %>%
+  mutate(subrank = min_rank(pick(new_point_code, rank)), # create unique point codes
+         n = n()) %>%
+  ungroup() %>%
+  mutate(point_code = ifelse(is.na(point_code), str_c(grts_ranking_draw, "_", subrank), point_code)) %>%
+  select(rank, vhag_code, prop_3260, sac_streams, grts_ranking, grts_ranking_draw, segment_id, point_code, new_point_code) 
 
-check <- mhq_streams_refpoints_valid %>%
-  group_by(segment_id) %>%
+check <- sampleframe_3260_ranking %>%
+  group_by(grts_ranking_draw , point_code) %>%
   filter(n() > 1)
 
-sampleframe_3260_ranking <- sampleframe_3260_ranking %>%
-  left_join(select(mhq_streams_refpoints_valid, segment_id, point_code, db_ref), by = "segment_id") %>%
-  mutate(point_code = ifelse(is.na(point_code), str_c(grts_ranking_draw, "_1"), point_code),
-         point_code = ifelse(segment_id == "1_4_772", str_c(grts_ranking_draw, "_2"), point_code ))
-  
-```
+check <- sampleframe_3260_ranking %>%
+  group_by(point_code) %>%
+  filter(n() > 1)
 
-```{r}
-sampleframe_3260_ranking %>% 
-  write_vc(root = "../output", 
-           file = "sampleframe_3260_grts_ranking",
-           digits = 10,
-           sorting = c("grts_ranking_draw", "rank"))
+check_new_point_code <- sampleframe_3260_ranking %>%
+  filter(new_point_code) %>%
+  mutate(point_code_exists = point_code %in% mhq_streams_refpoints$point_code) %>%
+  filter(point_code_exists)
+
+# sampleframe_3260_ranking <- sampleframe_3260_ranking %>%
+#   mutate(segment_id = ifelse(point_code == "1047854_1", "1_4_1088", segment_id)) # manual link
+
+# sampleframe_3260_ranking <- sampleframe_3260_ranking %>%
+#   left_join(select(mhq_streams_refpoints_valid, segment_id, point_code, db_ref), by = "segment_id") %>%
+#   mutate(point_code = ifelse(is.na(point_code), str_c(grts_ranking_draw, "_1"), point_code),
+#          point_code = ifelse(segment_id == "1_4_772" & !is.na(segment_id), str_c(grts_ranking_draw, "_2"), point_code ))
+  
 ```
 
 

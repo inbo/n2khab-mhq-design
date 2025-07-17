@@ -5,15 +5,10 @@
   sorting:
   - grts_ranking_draw
   - rank
-  hash: addf16374c5b0411430cff734c66befd0ad59ab4
-  data_hash: 2bbde0af05f80d916a1ca6f191af3eb7c124cce7
+  hash: a171f8fd3386cc00b14a215613f957292427c24e
+  data_hash: 6b4cbb34568e5174cfea0fd57d692c638800d3da
 rank:
   class: integer
-vhag_code:
-  class: integer
-prop_3260:
-  class: numeric
-  digits: 10
 sac_streams:
   class: character
 grts_ranking:
@@ -26,5 +21,8 @@ segment_id:
   class: character
 point_code:
   class: character
-db_ref:
+segment_id_v1_7:
   class: character
+prop_3260:
+  class: numeric
+  digits: 10
