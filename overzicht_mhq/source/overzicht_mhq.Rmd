@@ -1,0 +1,330 @@
+---
+title: "Overzicht MHQ"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(git2rdata)
+library(n2khab)
+library(sf)
+library(leaflet)
+library(mapview)
+library(units)
+library(leafpop)
+```
+
+# Meetpunten terrestrische habitats
+
+```{r}
+
+path_admin <- fileman_up("n2khab-sample-admin")
+
+mhq_terr_measurements <- read_vc(root = file.path(path_admin, "data/mhq_terr/rapportage2025"),
+                            file = "mhq_terr_measurements")
+
+mhq_terr_val <- read_vc(root = file.path(path_admin, "data/mhq_terr"),
+                            file = "mhq_terr_measurements_validation")
+
+mhq_terr_assessments <- read_vc(root = file.path(path_admin, "data/mhq_terr/rapportage2025"),
+                            file = "mhq_terr_assessments")
+
+mhq_terr_popunits <- read_vc(root = file.path(path_admin, "data/mhq_terr/rapportage2025"),
+                            file = "mhq_terr_popunits")
+
+mhq_terr_refpoints <- read_vc(root = file.path(path_admin, "data/mhq_terr/rapportage2025"),
+                            file = "mhq_terr_refpoints")
+```
+
+```{r}
+mhq_duinen <- read_csv2("../data/mhq_terr_cyclus2_duinen_inbo_2023-05-11.csv")
+
+mhq_heide6510 <- read_csv2("../data/mhq_terr_cyclus2_anb.csv")
+
+mhq_graslandmoeras <- read_csv2("../data/mhq_terr_cyclus2_inbo.csv")
+
+mhq_bos <- read_csv2("../data/mhq_forests_cycle1.csv")
+
+mhq_cycle2 <- mhq_duinen %>%
+  bind_rows(mhq_heide6510) %>%
+  bind_rows(mhq_graslandmoeras) %>%
+  rename(type = habitattype) %>%
+  mutate(main_type = str_sub(type, 1, 4))
+
+mhq_terr_measurements <- mhq_terr_measurements %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  filter(!str_detect(type, "rbb|1310")) #geen meetnet
+
+cycle_period <- mhq_cycle2 %>%
+  filter(!is.na(datum_opname_cyclus1)) %>%
+  group_by(main_type) %>%
+  summarise(start_year_c1 = min(year(datum_opname_cyclus1)),
+            end_year_c1 = max(year(datum_opname_cyclus1))) %>%
+  ungroup()
+
+cycle_period_add <- mhq_terr_measurements %>% # (nog) geen 2de meetcyclus opgestart 
+  anti_join(mhq_cycle2, by = "main_type") %>%
+  group_by(main_type) %>%
+  summarise(start_year_c1 = min(year(measurement_date)),
+            end_year_c1 = max(year(measurement_date))) %>%
+  ungroup() %>%
+  mutate(end_year_c1 = ifelse(str_sub(main_type, 1, 1) == "9", NA, end_year_c1))
+
+cycle_period <- cycle_period %>%
+  bind_rows(cycle_period_add)
+
+mhq_terr_measurements_cycle <- mhq_terr_measurements %>%
+  left_join(cycle_period, by = "main_type") %>%
+  mutate(cycle = ifelse(year(measurement_date) > end_year_c1, "c2", "c1"),
+         cycle = ifelse(survey == "anb_c1" & !is.na(survey), "c1", cycle),
+         cycle = ifelse(is.na(end_year_c1), "c1", cycle)) %>% # bos nog in eerste meetcyclus
+  ungroup()
+
+```
+
+### Meetcyclus 1
+
+```{r}
+mhq_terr_measured_cycle1 <- mhq_terr_measurements_cycle %>%
+  filter(cycle == "c1") %>%
+  left_join(mhq_terr_refpoints, by = "point_code") %>%
+  mutate(measured = TRUE) %>%
+  select(point_code, main_type, type, measured, measurement_date, cycle, start_year_c1, end_year_c1, survey, db_ref, recording_givid, x, y)
+
+mhq_terr_not_measured_cycle1 <- mhq_bos %>% #nog op te meten bospunten
+  anti_join(mhq_terr_measured_cycle1, by = "point_code") %>%
+  mutate(main_type = str_sub(habitattype, 1, 4),
+         measured = FALSE,
+         cycle = "c1",
+         start_year_c1 = 2015) %>%
+  select(point_code, main_type, type = habitattype, measured, cycle, start_year_c1, x, y)
+
+mhq_terr_cycle_1 <- mhq_terr_measured_cycle1 %>%
+  bind_rows(mhq_terr_not_measured_cycle1)
+
+```
+
+### Meetcyclus 2
+
+```{r}
+mhq_terr_measured_cycle2 <- mhq_terr_measurements_cycle %>%
+  filter(cycle == "c2") %>%
+  semi_join(mhq_terr_cycle_2, by = "point_code") %>%
+  left_join(mhq_terr_refpoints, by = "point_code") %>%
+  mutate(measured = TRUE) %>%
+  select(point_code, main_type, type, measured, measurement_date, cycle, survey, db_ref, recording_givid, x, y)
+
+mhq_terr_notmeasured_cycle2 <- mhq_cycle2 %>%
+  anti_join(mhq_terr_measured_cycle2, by = "point_code") %>%
+  mutate(main_type = str_sub(type, 1, 4),
+         measured = FALSE,
+         cycle = "c2") %>%
+  select(point_code, main_type, type, measured, cycle,  x, y)
+
+mhq_terr_cycle_2 <- mhq_terr_measured_cycle2 %>%
+  bind_rows(mhq_terr_notmeasured_cycle2)
+```
+
+### Combine
+
+```{r}
+mhq_terr <- mhq_terr_cycle_1 %>%
+  select(-start_year_c1, -end_year_c1) %>%
+  bind_rows(mhq_terr_cycle_2)
+
+mhq_terr %>%
+  write_csv2("../output/mhq_terr_2024.csv")
+```
+
+```{r}
+mhq_terr_sf <- mhq_terr %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370)
+
+types <- read_types()
+
+types_cat <- types %>%
+  distinct(main_type, typeclass_name)
+
+data_show <- mhq_terr_sf %>%
+  left_join(types_cat, by = "main_type")
+
+mapView(data_show, zcol = "typeclass_name",
+          layer.name = "Habitat category",
+          col.regions = viridis::viridis_pal(option = "A"),
+          popup = popupTable(data_show,
+                             zcol = c("type", "cycle", "measured", "measurement_date"))
+          )
+
+```
+
+# Checks
+
+```{r}
+
+mhq_terr_val <- mhq_terr_val %>%
+  select(point_code, type, measurement_date, valid_sampling_unit)
+
+check_popunit <- mhq_terr %>%
+  left_join(mhq_terr_val, by = c("point_code", "type", "measurement_date")) %>%
+  mutate(in_popunit = point_code %in% mhq_terr_popunits$point_code)
+```
+
+# Meetpunten stilstaande wateren
+
+
+```{r}
+
+path_lsvi_aq <- file.path(fileman_up("n2khab-mhq-data"), "processed/inboveg_mhq_aq")
+
+path_admin_mhq <- file.path(fileman_up("n2khab-sample-admin"), "data/mhq_watersurfaces/rapportage2025")
+
+measurements_ws <- read_vc(file = "HT31xx_header", root = path_lsvi_aq)
+
+mhq_ws_popunits <- read_vc(file = "mhq_watersurfaces_populationunits", path_admin_mhq)
+mhq_ws_assessments <- read_vc(file = "mhq_watersurfaces_assessments", path_admin_mhq)
+
+watersurfaces_hab <- read_watersurfaces_hab()
+
+watersurfaces_hab_table <- watersurfaces_hab$watersurfaces_types
+watersurfaces_hab_polygons <- watersurfaces_hab$watersurfaces_polygons
+
+watersurfaces_code <- read_csv2(file.path(path_lsvi_aq, "watervlakken_codes/mapping_table_inbocode.csv")) %>%
+  select(code_watersurfaces = codeplas, inbocode)
+```
+
+```{r}
+# old ws code
+measurements_ws_old <- measurements_ws %>%
+  filter(str_detect(location, "_")) %>%
+  rename(inbocode = location) %>%
+  left_join(watersurfaces_code, by = "inbocode")
+
+no_match <- measurements_ws_old %>%
+  filter(is.na(code_watersurfaces))
+
+mhq_ws_popunits_unique <- mhq_ws_popunits %>%
+  group_by(sampling_unit_code, grts_ranking, grts_ranking_draw, area_class, sac) %>%
+  summarise(type_target = str_c(type, collapse = ";"),
+            source = str_c(str_c(type, ":", source), collapse = ";")) %>%
+  ungroup() %>%
+  rename(code_watersurfaces = sampling_unit_code)
+
+measurements_ws_all <- measurements_ws %>%
+  filter(!str_detect(location, "_")) %>%
+  rename(code_watersurfaces = location) %>%
+  bind_rows(measurements_ws_old) %>%
+  left_join(mhq_ws_popunits_unique, by = "code_watersurfaces") %>%
+  mutate(in_watersurfaces_hab = code_watersurfaces %in% watersurfaces_hab_table$polygon_id) %>%
+  filter(suitable_mhq)
+
+```
+
+De opnames bevatten ook waterlichamen die niet geselecteerd werden in kader van MHQ.
+We selecteren de waterlichamen die werden opgemeten in de eerste meetcyclus en de waterlichamen die werden geselecteerd voor de tweede meetcyclus. 
+
+```{r }
+
+sample_cycle2 <- st_read(file.path(fileman_up("n2khab-mhq-data"), "processed/design_watersurfaces/mhq_standingwater_cycle2_2024-04-17.gpkg")) %>%
+  st_drop_geometry()
+
+voortgang_cycle2 <- read_csv2(file.path(fileman_up("n2khab-mhq-data"), "processed/design_watersurfaces/voortgang_mhq_aq_stilstaand_cycle2.csv"))
+
+measurements_cycle1 <- read_vc(file = "mhq_watersurfaces_measurements_cycle1", root = file.path(fileman_up("n2khab-mhq-data"), "processed/design_watersurfaces/")) %>%
+  filter(measurement_type == "biotic")
+
+measurements_ws_all <- measurements_ws_all %>%
+  mutate(in_sample_cycle2 = code_watersurfaces %in% sample_cycle2$polygon_id,
+         measured_cycle1 = code_watersurfaces %in% measurements_cycle1$polygon_id) %>%
+  mutate(ws_type = ifelse(in_sample_cycle2 | measured_cycle1, "mhq_sample", 
+                       ifelse(!is.na(grts_ranking_draw), "mhq_sampleframe", "other"))) %>%
+  filter(ws_type == "mhq_sample" | type_observed == "3110" | area_class == "area >= 50 ha") %>%
+  group_by(code_watersurfaces) %>%
+  mutate(year_min = min(year(date)),
+         year_max = max(year(date))) %>%
+  ungroup() %>%
+  mutate(cycle = ifelse(year(date) < 2022, "c1",
+                        ifelse(!in_sample_cycle2, "c1", "c2")))
+```
+
+## Meetcyclus 1 en 2
+
+```{r}
+
+mhq_ws_cycle_measured <- measurements_ws_all %>%
+  mutate(main_type = str_sub(type_observed, 1, 4)) %>%
+  select(code_watersurfaces,  main_type, type = type_observed, area_class, measured = measured_cycle1, measurement_date = date, cycle, survey, recording_givid) %>%
+  arrange(measurement_date)
+
+mhq_ws_cycle2_measured <- mhq_ws_cycle_measured %>%
+  filter(cycle == "c2")
+
+mhq_ws_cycle2_notmeasured <- sample_cycle2 %>%
+  rename(code_watersurfaces = polygon_id) %>%
+  anti_join(mhq_ws_cycle2_measured, by = "code_watersurfaces") %>%
+  mutate(cycle = "c2") %>%
+  select(code_watersurfaces, type = type_all, area_class, cycle) %>%
+  separate_longer_delim(type, "; ") %>%
+  mutate(main_type = str_sub(type, 1, 4),
+         measured = FALSE)
+
+mhq_ws_cycle <- mhq_ws_cycle_measured %>%
+  bind_rows(mhq_ws_cycle2_notmeasured)
+
+mhq_ws_cycle %>%
+  write_csv2("../output/mhq_watersurfaces_2024.csv")
+
+watersurfaces <- read_watersurfaces()
+
+watersurfaces_select <- watersurfaces %>%
+  filter(polygon_id %in% mhq_ws_cycle$code_watersurfaces) %>%
+  select(polygon_id)
+
+watersurfaces_select %>%
+  st_write("../output/mhq_watersurfaces_polygons_2024.gpkg")
+
+```
+
+# Meetpunten stromende wateren
+
+```{r}
+mhq_streams_measurements <- read_vc(root = file.path(path_admin, "data/mhq_streams/v2024"),
+                            file = "mhq_streams_measurements")
+
+mhq_streams_refpoints <- read_vc(root = file.path(path_admin, "data/mhq_streams/v2024"),
+                            file = "mhq_streams_refpoints")
+
+mhq_streams_sample_cycle2 <- read_csv2("../data/update_meetpunten3260_cyclus2_2025-07-15.csv")
+
+```
+
+```{r}
+mhq_streams_cycle_measured <- mhq_streams_measurements %>%
+  mutate(cycle = ifelse(year(measurement_date) < 2022, "c1", "c2"),
+         type = "3260",
+         main_type = "3260",
+         measured = TRUE) %>%
+  left_join(select(mhq_streams_refpoints, point_code, segment_id, x, y), by = c("point_code", "segment_id")) %>%
+  select(point_code, segment_id, main_type, type, measured, measurement_date, cycle, recording_givid, user_reference, x, y)
+
+mhq_streams_cycle_notmeasured <- mhq_streams_sample_cycle2 %>%
+  filter((sac_streams == "intersecting or downstream" & volgorde <= 25) |
+         (sac_streams == "outside" & volgorde <= 12)) %>%
+  mutate(measured = FALSE,
+         cycle = "c2",
+         type = "3260",
+         main_type = "3260") %>%
+  select(point_code, segment_id = sampling_unit_code, main_type, type, measured,  cycle, x, y)
+  
+check <- mhq_streams_cycle_notmeasured %>%
+  semi_join(mhq_streams_cycle_measured %>%
+              filter(cycle == "c2"), by = "point_code")
+
+ mhq_streams_cycle <- mhq_streams_cycle_measured %>%
+   bind_rows(mhq_streams_cycle_notmeasured)
+ 
+ mhq_streams_cycle %>%
+  write_csv2("../output/mhq_streams_2024.csv")
+```
+

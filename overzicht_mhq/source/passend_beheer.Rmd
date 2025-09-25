@@ -1,0 +1,130 @@
+---
+title: "Overzicht MHQ"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(git2rdata)
+library(n2khab)
+library(sf)
+library(leaflet)
+library(units)
+```
+# Data
+
+## Kaart passend beheer
+
+```{r}
+path <- file.path(fileman_up("n2khab-mhq-data"), "raw/passend_beheer")
+
+map_beheer <- st_read(file.path(path, "passend_beheer.gpkg")) %>%
+  mutate(nsb_1_6 = paste0(nsb1, ";", nsb2, ";", nsb3, ";", nsb4, ";", nsb5, ";", nsb6)) %>%
+  select(nsb_1_6) 
+
+```
+
+## Meetpunten open habitats terrestrisch
+
+```{r}
+mhq_duinen <- read_csv2("../data/mhq_terr_cyclus2_duinen_inbo_2023-05-11.csv")
+
+mhq_heide6510 <- read_csv2("../data/mhq_terr_cyclus2_anb.csv")
+
+mhq_graslandmoeras <- read_csv2("../data/mhq_terr_cyclus2_inbo.csv")
+
+mhq_cycle2 <- mhq_duinen %>%
+  bind_rows(mhq_heide6510) %>%
+  bind_rows(mhq_graslandmoeras) 
+
+mhq_cycle2_passend_beheer <- mhq_cycle2 %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(map_beheer) %>%
+  mutate(passend_beheer = ifelse(is.na(nsb_1_6), "niet_passend_beheer", "passend_beheer")) %>%
+  st_drop_geometry() %>%
+  distinct(point_code, sbz, hoofdtype, habitattype, uitvoer_opname, passend_beheer)
+  
+```
+
+## Overzicht meetpunten passend beheer
+
+```{r}
+overzicht_passend_beheer <- mhq_cycle2_passend_beheer %>%
+  filter(uitvoer_opname == "hoofdtype aanwezig") %>%
+  group_by(hoofdtype, passend_beheer) %>%
+  summarise(n_meetpunten = n()) %>%
+  ungroup() %>%
+  pivot_wider(names_from = passend_beheer,
+              values_from = n_meetpunten
+                )
+
+overzicht_sbzh <- mhq_cycle2 %>%
+  st_drop_geometry() %>%
+  filter(uitvoer_opname == "hoofdtype aanwezig") %>%
+  group_by(hoofdtype, sbz) %>%
+  summarise(n_meetpunten = n()) %>%
+  ungroup() %>%
+  mutate(sbz = ifelse(sbz == 1, "Binnen SBZH", "Buiten SBZH")) %>%
+  pivot_wider(names_from = sbz,
+              values_from = n_meetpunten, 
+              values_fill = 0
+                )
+
+write_csv2(overzicht_passend_beheer, "../output/meetnet_habitatkwaliteit_passend_beheer.csv")
+
+write_csv2(overzicht_sbzh, "../output/meetnet_habitatkwaliteit_sbzh.csv")
+```
+
+## Overzicht oppervlakte passend beheer
+
+```{r}
+habmap <- read_habitatmap_stdized()
+
+habmap_types <- habmap$habitatmap_types 
+habmap_pol <- habmap$habitatmap_polygons
+
+area_pol <- habmap_pol %>%
+  mutate(area_m2 = drop_units(st_area(geom))) %>%
+  select(polygon_id, area_m2) %>%
+  st_drop_geometry()
+
+habmap_types_area <- habmap_types %>%
+  left_join(area_pol, by = "polygon_id") %>%
+  filter(str_sub(type, 1, 3) != "rbb") %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  group_by(main_type) %>%
+  summarise(area_tot_ha = round(sum(phab / 100 * area_m2 / 10000), 1)) %>%
+  ungroup()
+
+map_beheer_union <- map_beheer %>%
+  mutate(passend_beheer = "Ja") %>%
+  group_by(passend_beheer) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+area_passend_beheer <- habmap_pol %>%
+  st_intersection(map_beheer_union) %>%
+  mutate(area_m2 = drop_units(st_area(geom))) %>%
+  select(polygon_id, area_m2) %>%
+  st_drop_geometry() %>%
+  group_by(polygon_id) %>%
+  summarise(area_m2 = sum(area_m2)) %>%
+  ungroup()
+
+habmap_types_area_pb <- habmap_types %>%
+  left_join(area_passend_beheer, by = "polygon_id") %>%
+  filter(str_sub(type, 1, 3) != "rbb") %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  group_by(main_type) %>%
+  summarise(area_pb_ha = round(sum(phab / 100 * area_m2 / 10000, na.rm = TRUE), 1)) %>%
+  ungroup()
+
+habmap_types_area <- habmap_types_area %>%
+  left_join(habmap_types_area_pb, by = "main_type") %>%
+  mutate(area_nt_pb_ha = area_tot_ha - area_pb_ha)
+
+```
+
+
