@@ -40,10 +40,11 @@ mhq_watersurfaces_assessments_add_gh <- gh %>%
 
 mhq_watersurfaces_assessments_add_inaccessible <- inaccessible %>%
   select(type = type_all, polygon_id, inaccessible) %>%
+  separate_longer_delim(cols = type, delim = "; ") %>%
   mutate(assessment_date = as.Date("2024-01-30"),
          assessment_source = NA,
          is_present = NA,
-         any_type = NA,
+         any_habitat = NA,
          type = factor(type, levels = levels(mhq_watersurfaces_assessments$type)))
 
 mhq_watersurfaces_assessments <- mhq_watersurfaces_assessments %>%
