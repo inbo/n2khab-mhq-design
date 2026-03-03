@@ -1067,3 +1067,50 @@ write_csv2(vervangpunten_out, "../output/mhq_forests_vervangpunten.csv", na = ""
 vervangpunten_out %>%
   slice_head(n = 5)
 ```
+
+# Check results
+
+```{r}
+sample_extra <- read_csv2("../output/mhq_forests_cycle1.csv")
+
+n_extra_cycle1 <- n_distinct(sample_extra$point_code)
+
+mhq_assessments <- read_vc(file = "assessments", root = "../data/mhq_fieldmap")
+mhq_assessments_forest <- mhq_assessments %>%
+  filter(is.na(sampling_unit_code))
+
+mhq_measurements_forest <- mhq_assessments_forest %>%
+  filter(lsvi_measurement) %>%
+  filter(!is.na(type_observed)) %>%
+  mutate(grts_ranking = as.numeric(plot_id))
+
+mhq_measured <- mhq_assessments_forest %>%
+  filter(lsvi_measurement) %>% 
+  filter(!is.na(type_observed)) %>%
+  mutate(type_observed = ifelse(type_observed == "9130", "9130_end", type_observed)) %>%
+  group_by(type_observed) %>%
+  summarise(n_measured_extra = n_distinct(plot_id)) %>%
+  ungroup() %>%
+  rename(type = type_observed) %>%
+  filter(type != "9120")
+
+n_measured <- sum(mhq_measured$n_measured_extra)
+
+n_tot <- n_extra_cycle1 + n_measured
+
+n_tot_year <- n_tot/12
+```
+
+```{r}
+type_observed <- read_csv2("../output/type_observed_vbi.csv")
+
+overzicht <- type_observed %>%
+  mutate(type = ifelse(type == "91EO_va", "91E0_va", type),
+         phab = ifelse(is.na(phab), 100, phab)) %>%
+  group_by(type) %>%
+  summarise(n_records = n(),
+            n_expected = sum(phab/100)) %>%
+  ungroup()
+  
+```
+
