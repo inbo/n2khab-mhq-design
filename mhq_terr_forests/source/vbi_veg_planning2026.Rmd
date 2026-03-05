@@ -1,0 +1,161 @@
+---
+title: "Update overlay VBI and habitat map based"
+author: Toon Westra
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    number_sections: true
+    code_folding: hide
+    warning: FALSE
+date: "2024-03-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(git2rdata)
+library(RODBC)
+library(leaflet)
+library(n2khab)
+library(kableExtra)
+library(terra)
+library(buffeRs)
+library(crosstalk)
+```
+
+# Sampling units from Flemish Forest inventory
+
+We make use of following data sources (see [google drive](https://drive.google.com/drive/folders/1TjONf7WuoEYM6TzfHp9UW5KVw6ljMDgs)):
+
++ `vbi_strata_v2024-01-24.accdb`: observed habitat type (only available for the more recently measured plots)
++ `vbi_meetproces_v2022-11-15.accdb`: recorded coordinates
+
+```{r}
+
+db_strata <- "../data/vbi_strata_v2024-01-24.accdb"
+db_meetproces <- "../data/vbi_meetproces_v2022-11-15.accdb"
+db_analyse <- "../data/vbi_analysedatabank_v2023-08-22.accdb"
+
+connect_db <-   odbcConnectAccess2007(db_strata)
+strata_orig <- sqlFetch(connect_db, "tblplotstratadynamic")
+odbcClose(connect_db)
+
+connect_db <-   odbcConnectAccess2007(db_meetproces)
+coordinaten_orig <- sqlFetch(connect_db, "tblcoordinaten")
+odbcClose(connect_db)
+
+connect_db <-   odbcConnectAccess2007(db_analyse)
+bestandskarakt_orig <- sqlFetch(connect_db, "tbl2BestandskaraktKwal")
+cover_species_vbi <- sqlFetch(connect_db, "tbl11VegetatieSamenstelling")
+measurements_vbi <- sqlFetch(connect_db, "tbl4Vegetatie")
+odbcClose(connect_db)
+
+strata <- strata_orig %>%
+  select(plot_id = IDPlots, segment_id = IDSegments, periode = Periode, landuse = LandUse, stand_type = StandType, type_observed = Habitat) %>%
+  filter(!is.na(stand_type)) %>%
+  select(-stand_type)
+
+coordinaten <- coordinaten_orig %>%
+  select(plot_id = idplots, x, y, type_coord = type, periode, reeks, plotweight)
+
+bestandskarakt <- bestandskarakt_orig %>%
+  select(plot_id = IDPlots, periode = Periode, segment_id = IDSegments, stand_type = v2_StandType)
+
+measurements_vbi <- measurements_vbi %>%
+  select(plot_id = IDPlots, segment_id = IDSegments, periode = Periode, veg_record = VegRecord, dendro_record = DendroRecord, dendro_record_zero = DendroRecordZero)
+
+cover_species_vbi <- cover_species_vbi %>%
+  select(plot_id = IDPlots, periode = Periode, layer = Layer, name_nl = NameNl, name_sc = NameSc, cover_categ =  Cover_categ, date_veg = DateVeg)
+
+coord_recent <- coordinaten %>%
+  semi_join(cover_species_vbi, by = c("plot_id")) %>%
+  group_by(plot_id) %>%
+  slice_max(periode) %>%
+  ungroup()
+
+#write_csv2(coord_recent, "../output/coord_vbi.csv")
+```
+
+```{r}
+vbi_habitatmap_2023 <- read_csv2("../output/type_observed_vbi.csv")
+
+n_plots <- unique(vbi_habitatmap$plot_id)
+```
+
+Overlay vbi and habitatmap 2025
+
+```{r}
+vbi_reeks <- coordinaten_orig %>%
+  group_by(idplots) %>%
+  filter(periode == max(periode)) %>%
+  ungroup() %>%
+  distinct(idplots, reeks, x, y) %>%
+  rename(plot_id = idplots)
+
+plot_reeks <- vbi_reeks %>%
+  distinct(plot_id, reeks)
+
+bestandskarakt_actual <- bestandskarakt %>%
+  group_by(plot_id) %>%
+  slice_max(periode) %>%
+  ungroup() %>%
+  filter(segment_id == 1) %>%
+  filter(periode > 1) %>%
+  filter(!is.na(stand_type))
+
+habitatmap_2025 <- read_habitatmap_stdized()
+habpol_2025 <- habitatmap_2025$habitatmap_polygons
+habtype_2025 <- habitatmap_2025$habitatmap_types
+
+vbi_meetpunten_sf <- bestandskarakt_actual %>%
+  left_join(strata, by = c("plot_id", "periode", "segment_id")) %>%
+  left_join(coordinaten, by = c("plot_id", "periode")) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_join(select(habitatmap_2025$habitatmap_polygons, polygon_id))
+
+vbi_meetpunten_hab <- vbi_meetpunten_sf %>%
+  st_drop_geometry() %>%
+  left_join(habitatmap_2025$habitatmap_types, by = "polygon_id") %>%
+  mutate(main_type = str_sub(type, 1, 4)) %>%
+  left_join(measurements_vbi, by = c("plot_id", "segment_id", "periode")) %>%
+  mutate(measured = veg_record & (is.na(dendro_record) | (dendro_record | dendro_record_zero)))
+
+vbi_meetpunten_hab_update <- vbi_meetpunten_hab %>%
+  filter(is.na(type_observed) | type_observed %in% c("9 : bossen", "91E0", "91E0*")) %>% #al deze meetpunten zijn al gecontroleerd
+  filter(!is.na(polygon_id)) %>%
+  filter(str_detect(type, "91|2180")) %>%
+  filter(certain | (type == "91E0")) %>%
+  mutate(new_plot = !plot_id %in% vbi_habitatmap_2023$plot_id)
+
+check_new <- vbi_meetpunten_hab_update %>%
+  filter(new_plot)
+
+check_removed <- vbi_habitatmap_2023 %>%
+  filter(source == "habitatmap2023") %>%
+  filter(!plot_id %in% vbi_meetpunten_hab_update$plot_id) %>%
+  left_join(select(vbi_meetpunten_hab, plot_id, reeks, type_observed, polygon_id, type_2025 = type, stand_type, landuse, certain, code_orig), by = c("plot_id"))
+```
+
+```{r}
+type_observed_vbi_update <- vbi_habitatmap_2023 %>%
+  left_join(plot_reeks, by = "plot_id") %>%
+  filter(source != "habitatmap2023") %>%
+  bind_rows(vbi_meetpunten_hab_update %>%
+              mutate(source = "habitatmap2025") %>%
+              select(plot_id, reeks, periode, source, type, phab)) %>%
+  arrange(reeks, plot_id) %>%
+  select(plot_id, reeks, everything())
+
+n_plots <- type_observed_vbi_update$plot_id %>%
+  unique()
+
+type_observed_vbi_update %>%
+  write_csv2("../output/type_observed_vbi_2025.csv")
+```
+
+
+
