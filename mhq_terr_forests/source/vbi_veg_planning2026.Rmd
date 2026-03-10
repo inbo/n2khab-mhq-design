@@ -1,5 +1,5 @@
 ---
-title: "Update overlay VBI and habitat map based"
+title: "Update overlay VBI and habitat map"
 author: Toon Westra
 output:
   html_document:
@@ -10,11 +10,13 @@ output:
     number_sections: true
     code_folding: hide
     warning: FALSE
-date: "2024-03-11"
+date: "2026-03-10"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
 library(tidyverse)
 library(sf)
 library(git2rdata)
@@ -25,13 +27,38 @@ library(kableExtra)
 library(terra)
 library(buffeRs)
 library(crosstalk)
+library(DT)
 ```
+
+# Introduction
+
+In 2024 we made an analysis of the most probable Natura 2000 forest habitat type for each sampling unit of the Flemish Forest Inventory (VBI).
+This analysis was based on:
+
++ assessment of habitat type by VBI fieldworkers (only for part of the VBI sampling units)
++ habitatmap ([habitatmap_terr_2023_v1](https://zenodo.org/records/13886579))
++ manual control of habitat expert (when the observed habitat type was different than the type according to the habitatmap)
+
+The file 'type_observed_vbi.csv' contains the results of the analysis and can be found in [this google drive folder](https://drive.google.com/drive/folders/1pqMzRD-wGZCjhgEfRMarRSQpazs9nVnR).
+
+```{r}
+vbi_habitatmap_2023 <- read_csv2("../output/type_observed_vbi.csv")
+
+n_plots <- unique(vbi_habitatmap_2023$plot_id)
+```
+
+In 2026, the VBI monitoring protocol changes and vegetation cover and composition will only be assessed in sampling units that contain Natura 2000 habitat.
+The file 'type_observed_vbi.csv' will be used to select the VBI sampling units with (high probability of) Natura 2000 habitat.
+
+In 2025, a new habitat map was published: [habitatmap_2025](https://zenodo.org/records/18484399). 
+We will update the file 'type_observed_vbi.csv' based on the new version of the habitat map.
 
 # Sampling units from Flemish Forest inventory
 
 We make use of following data sources (see [google drive](https://drive.google.com/drive/folders/1TjONf7WuoEYM6TzfHp9UW5KVw6ljMDgs)):
 
 + `vbi_strata_v2024-01-24.accdb`: observed habitat type (only available for the more recently measured plots)
++ `vbi_analysedatabank_v2023-08-22.accdb`: analysis variables per plot
 + `vbi_meetproces_v2022-11-15.accdb`: recorded coordinates
 
 ```{r}
@@ -49,6 +76,7 @@ coordinaten_orig <- sqlFetch(connect_db, "tblcoordinaten")
 odbcClose(connect_db)
 
 connect_db <-   odbcConnectAccess2007(db_analyse)
+check <- sqlTables(connect_db)
 bestandskarakt_orig <- sqlFetch(connect_db, "tbl2BestandskaraktKwal")
 cover_species_vbi <- sqlFetch(connect_db, "tbl11VegetatieSamenstelling")
 measurements_vbi <- sqlFetch(connect_db, "tbl4Vegetatie")
@@ -63,7 +91,7 @@ coordinaten <- coordinaten_orig %>%
   select(plot_id = idplots, x, y, type_coord = type, periode, reeks, plotweight)
 
 bestandskarakt <- bestandskarakt_orig %>%
-  select(plot_id = IDPlots, periode = Periode, segment_id = IDSegments, stand_type = v2_StandType)
+  select(plot_id = IDPlots, point_id = IDGroup, periode = Periode, year = DateDendro, segment_id = IDSegments, stand_type = v2_StandType)
 
 measurements_vbi <- measurements_vbi %>%
   select(plot_id = IDPlots, segment_id = IDSegments, periode = Periode, veg_record = VegRecord, dendro_record = DendroRecord, dendro_record_zero = DendroRecordZero)
@@ -81,14 +109,7 @@ coord_recent <- coordinaten %>%
 ```
 
 ```{r}
-vbi_habitatmap_2023 <- read_csv2("../output/type_observed_vbi.csv")
-
-n_plots <- unique(vbi_habitatmap$plot_id)
-```
-
-Overlay vbi and habitatmap 2025
-
-```{r}
+#we willen reeks toevoegen ivm planning
 vbi_reeks <- coordinaten_orig %>%
   group_by(idplots) %>%
   filter(periode == max(periode)) %>%
@@ -99,6 +120,7 @@ vbi_reeks <- coordinaten_orig %>%
 plot_reeks <- vbi_reeks %>%
   distinct(plot_id, reeks)
 
+#meest recente opname per meetpunt
 bestandskarakt_actual <- bestandskarakt %>%
   group_by(plot_id) %>%
   slice_max(periode) %>%
@@ -107,16 +129,54 @@ bestandskarakt_actual <- bestandskarakt %>%
   filter(periode > 1) %>%
   filter(!is.na(stand_type))
 
-habitatmap_2025 <- read_habitatmap_stdized()
-habpol_2025 <- habitatmap_2025$habitatmap_polygons
-habtype_2025 <- habitatmap_2025$habitatmap_types
-
 vbi_meetpunten_sf <- bestandskarakt_actual %>%
   left_join(strata, by = c("plot_id", "periode", "segment_id")) %>%
   left_join(coordinaten, by = c("plot_id", "periode")) %>%
-  st_as_sf(coords = c("x", "y"), crs = 31370) %>%
+  st_as_sf(coords = c("x", "y"), crs = 31370)
+
+overzicht <- vbi_meetpunten_sf %>%
+  st_drop_geometry() %>%
+  mutate(habtype_assessed = !is.na(type_observed)) %>%
+  group_by(periode, reeks, habtype_assessed) %>%
+  summarise(year_min = min(year, na.rm = TRUE),
+            year_max = max(year, na.rm = TRUE),
+            n = n_distinct(point_id)) %>%
+  ungroup()
+```
+
+For each sampling unit we select the most recent measurement (available in the dataset) and the corresponding coordinates.
+
+The table below gives an overview of the number of VBI plots for which the observed habitat type was assessed.
+
+```{r}
+overzicht %>%
+  datatable(rownames = FALSE,
+            filter = "top")
+```
+
+# New habitat map
+
+`habitatmap_terr_2025_v1` is not yet published.
+We use a temporary file.
+To do: publish data source and add link.
+
+```{r}
+habitatmap_2025 <- read_habitatmap_stdized()
+```
+
+# Overlay VBI sampling units and habitatmap2025
+
++ Overlay between measured VBI sampling units and the habitatmap2025.
++ Selection of sampling units that are located in habitatmap2025 polygon with habitat type 2180 or 91xx
++ Selection of sampling units for which the observed habitat type has not been assessed yet (the other sampling units have already been checked by the habitat expert)
+
+```{r}
+vbi_meetpunten_sf <- vbi_meetpunten_sf %>%
   st_join(select(habitatmap_2025$habitatmap_polygons, polygon_id))
 
+```
+
+```{r}
 vbi_meetpunten_hab <- vbi_meetpunten_sf %>%
   st_drop_geometry() %>%
   left_join(habitatmap_2025$habitatmap_types, by = "polygon_id") %>%
@@ -125,7 +185,7 @@ vbi_meetpunten_hab <- vbi_meetpunten_sf %>%
   mutate(measured = veg_record & (is.na(dendro_record) | (dendro_record | dendro_record_zero)))
 
 vbi_meetpunten_hab_update <- vbi_meetpunten_hab %>%
-  filter(is.na(type_observed) | type_observed %in% c("9 : bossen", "91E0", "91E0*")) %>% #al deze meetpunten zijn al gecontroleerd
+  filter(is.na(type_observed) | type_observed %in% c("9 : bossen", "91E0", "91E0*")) %>%
   filter(!is.na(polygon_id)) %>%
   filter(str_detect(type, "91|2180")) %>%
   filter(certain | (type == "91E0")) %>%
@@ -140,6 +200,32 @@ check_removed <- vbi_habitatmap_2023 %>%
   left_join(select(vbi_meetpunten_hab, plot_id, reeks, type_observed, polygon_id, type_2025 = type, stand_type, landuse, certain, code_orig), by = c("plot_id"))
 ```
 
+Following sampling units are new compared to the previous selection (i.e. `vbi_type_observed.csv`) based on habitatmap2023.
+
+```{r}
+check_new %>%
+  select(plot_id, point_id, reeks, year_measured = year, stand_type, type, phab) %>%
+  arrange(reeks, plot_id) %>%
+  datatable(rownames = FALSE,
+            filter = "top")
+```
+Following sampling units are removed compared to the previous selection (i.e. `vbi_type_observed.csv`) based on habitatmap2023.
+
+```{r}
+check_removed %>%
+  select(plot_id, reeks, source, stand_type, type, phab, type_2025, polygon_id) %>%
+  arrange(reeks, plot_id) %>%
+  datatable(rownames = FALSE,
+            filter = "top")
+```
+
+# Update table `type_observed_vbi`
+
++ From the previous version we remove all records for which `source = habitatmap2023`.
++ We add the new records based on habitatmap2025.
+
+We write the result to the file 'type_observed_vbi_2025.csv'.
+
 ```{r}
 type_observed_vbi_update <- vbi_habitatmap_2023 %>%
   left_join(plot_reeks, by = "plot_id") %>%
@@ -148,14 +234,19 @@ type_observed_vbi_update <- vbi_habitatmap_2023 %>%
               mutate(source = "habitatmap2025") %>%
               select(plot_id, reeks, periode, source, type, phab)) %>%
   arrange(reeks, plot_id) %>%
-  select(plot_id, reeks, everything())
+  select(plot_id, reeks, periode, type, phab, source, note_manual_check)
 
 n_plots <- type_observed_vbi_update$plot_id %>%
   unique()
 
-type_observed_vbi_update %>%
-  write_csv2("../output/type_observed_vbi_2025.csv")
+# type_observed_vbi_update %>%
+#   write_csv2("../output/type_observed_vbi_2025.csv")
 ```
 
+# Future updates
 
+The table will be updated in the future when:
+
++ a dataset with new VBI habitat type assessments becomes available
++ a new version of the habitatmap becomes available
 
