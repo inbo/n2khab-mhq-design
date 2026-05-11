@@ -92,6 +92,8 @@ sample_frame_3260_v1_7_orig <- read_vc(root =  "../../habitatstreams/output", fi
 sample_frame_3260_v1_7 <- sample_frame_3260_v1_7_orig %>%
   st_as_sf(coords = c("x", "y"), crs = 31370) 
 
+sample_frame_3260_v1_7 %>% st_write("../output/sample_frame_3260_v1_7.gpkg")
+
 ```
 
 ```{r}
@@ -422,4 +424,58 @@ check_new_point_code <- sampleframe_3260_ranking %>%
   
 ```
 
+## Add GRTS ranking to watercourse segments not in current 3260 sample frame
 
+We also add grts-ranking to the 100 m segments which do currently not overlap with 3260 habitat.
+We only select segments > 50 m.
+
+```{r}
+watercourse_100mseg_points_grts <- watercourse_100mseg_points %>%
+  anti_join(sampleframe_3260_ranking, by = "rank")
+
+watercourse_100mseg_points_grts <- watercourse_100mseg_points_grts %>%
+  mutate(grts_ranking = (terra::extract(grts_master, watercourse_100mseg_points_grts))$GRTSmaster_habitats) %>%
+  filter(!is.na(grts_ranking))
+
+watercourse_100mseg_lines_grts <- watercourse_100mseg_lines %>%
+  filter(rank %in% watercourse_100mseg_points_grts$rank) %>%
+  mutate(length = st_length(geom)) %>%
+  inner_join(watercourse_100mseg_points_grts %>%
+               st_drop_geometry() %>%
+               select(rank, grts_ranking), 
+             by = "rank") %>%
+  filter(drop_units(length) > 50)
+
+watercourse_100mseg_points_grts <- watercourse_100mseg_points_grts %>%
+  filter(rank %in% watercourse_100mseg_lines_grts$rank)
+
+check_double <- watercourse_100mseg_points_grts %>%
+  st_drop_geometry() %>%
+  group_by(grts_ranking) %>%
+  filter(n() > 1) %>%
+  mutate(n_ranking = n())
+
+check_double_vhag <- watercourse_100mseg_points_grts %>%
+  st_drop_geometry() %>%
+  group_by(grts_ranking, vhag_code) %>%
+  filter(n() > 1) %>%
+  mutate(n_ranking = n())
+
+```
+
+```{r}
+
+# 2segments with the same grtrankign
+grts_rank_check <- 895473
+rank_check <- check_double %>%
+  filter(grts_ranking == grts_rank_check)
+segments_check <- watercourse_100mseg_lines %>%
+  filter(rank %in% rank_check$rank) %>%
+  mutate(length = st_length(geom))
+  
+segments_check %>%
+  st_transform(crs = 4326) %>%
+  leaflet() %>%
+  addTiles() %>%
+  addPolylines(label = ~rank)
+```
