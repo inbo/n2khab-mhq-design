@@ -198,7 +198,7 @@ check <- all(sample_measured$sampling_unit_code %in% all_measured_su$segment_id)
 
 # for the sampling units that have been measured we keep the original 100 m segment
 sampleframe_3260_ranking_measured <- sampleframe_3260_ranking %>%
-  filter(segment_id %in% all_measured_su$segment_id) %>%
+  filter(point_code %in% all_measured_su$point_code) %>%
   left_join(mhq_streams_refpoints, by = "point_code") %>%
   mutate(type_meetpunt = "Oud steekproefkader") %>%
    st_as_sf(coords = c("x", "y"), crs = 31370)
@@ -206,27 +206,28 @@ sampleframe_3260_ranking_measured <- sampleframe_3260_ranking %>%
 # for the other sampling units we use the new 100 m segments
 sampleframe_3260_ranking_notmeasured <- watercourse_100mseg_3260_points %>%
   inner_join(sampleframe_3260_ranking, by = c("rank", "vhag_code")) %>%
-  filter(!segment_id %in% all_measured_su$segment_id) %>%
+  filter(!point_code %in% all_measured_su$point_code) %>%
   mutate(type_meetpunt = "Nieuw steekproefkader")
   
 # other 100m segments outside 3260 sampleframe
 watercourse_100mseg_points_grts <- watercourse_100mseg_points_grts %>%
   mutate(type_meetpunt = "Segment zonder 3260",
-         grts_ranking_draw = grts_ranking)
+         grts_ranking_draw = grts_ranking) %>%
+  filter(!grts_ranking_draw %in% sampleframe_3260_ranking_measured$grts_ranking_draw)
 
 segments_ranking <- sampleframe_3260_ranking_measured %>%
   bind_rows(sampleframe_3260_ranking_notmeasured %>%
               rename(geometry = geom)) %>%
-  bind_rows(watercourse_100mseg_points_grts%>%
+  bind_rows(watercourse_100mseg_points_grts %>%
               rename(geometry = geom)) %>%
-  select(rank, vhag_code, prop_3260, sac_streams, segment_id, grts_ranking_draw) %>%
-  mutate(segment_id = ifelse(is.na(segment_id), str_c("2023_", rank), segment_id),
+  select(rank_vha = rank, vhag_code, prop_3260, sac_streams, segment_id, point_code, grts_ranking_draw) %>%
+  mutate(segment_id = ifelse(is.na(segment_id), str_c("2023_", rank_vha), segment_id),
          in_sampleframe3260 = !is.na(prop_3260),
          in_sample3260 = segment_id %in% all_measured_su$segment_id |
            segment_id %in% sample_output$sampling_unit_code)
 
 segments_ranking %>%
-  st_write("../output/100msegments_grts_ranking.gpkg", delete_layer = TRUE)
+  st_write("../output/vha_100msegments_grts_ranking.gpkg", delete_dsn = TRUE)
 ```
 
 ## Update admin tables
